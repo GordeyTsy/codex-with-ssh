@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Wrapper for OpenSSH clients that records inventory before executing."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
+from typing import List, Sequence
+
+ORIGINAL_DIR = os.environ.get("SSH_ORIGINAL_BIN_DIR", "/opt/codex-ssh/originals")
+HOSTCTL_BIN = os.environ.get("CODEX_HOSTCTL_BIN", "codex-hostctl")
+
+
+@dataclass
+class Invocation:
+    binary: str
+    args: Sequence[str]
+    target: str | None
+    port: int
+    jump_chain: List[str]
+
+
+def _split_jump(value: str) -> List[str]:
+    return [part.strip() for part in value.replace(",", " ").split() if part.strip()]
+
+
+def _extract_target(spec: str) -> str:
+    if "@" in spec:
+        spec = spec.split("@", 1)[1]
+    if spec.startswith("[") and "]" in spec:
+        return spec[1 : spec.index("]")]
+    if ":" in spec:
+        return spec.split(":", 1)[0]
+    return spec
+
+
+def _parse_options(argv: Sequence[str], *, mode: str) -> Invocation:
+    args: List[str] = []
+    jump_chain: List[str] = []
+    port = 22
+    target: str | None = None
+    it = iter(range(len(argv)))
+    idx = 0
+    while idx < len(argv):
+        arg = argv[idx]
+        args.append(arg)
+        if arg == "--":
+            args.extend(argv[idx + 1 :])
+            break
+        if arg.startswith("-J"):
+            value = arg[2:] or (argv[idx + 1] if idx + 1 < len(argv) else "")
+            if not arg[2:] and idx + 1 < len(argv):
+                idx += 1
+                args.append(argv[idx])
+            jump_chain = _split_jump(value)
+        elif arg in {"-p", "-P"} and mode in {"ssh", "scp", "sftp"}:
+            if idx + 1 < len(argv):
+                idx += 1
+                args.append(argv[idx])
+                try:
+                    port = int(argv[idx])
+                except ValueError:
+                    pass
+        elif arg.startswith("-p") and mode == "ssh" and len(arg) > 2:
+            try:
+                port = int(arg[2:])
+            except ValueError:
+                pass
+        elif arg.startswith("-P") and mode in {"scp", "sftp"} and len(arg) > 2:
+            try:
+                port = int(arg[2:])
+            except ValueError:
+                pass
+        elif arg == "-o":
+            if idx + 1 < len(argv):
+                idx += 1
+                option_value = argv[idx]
+                args.append(option_value)
+                if option_value.lower().startswith("proxyjump="):
+                    jump_chain = _split_jump(option_value.split("=", 1)[1])
+                elif option_value.lower().startswith("port="):
+                    try:
+                        port = int(option_value.split("=", 1)[1])
+                    except ValueError:
+                        pass
+        elif arg.startswith("-o") and "=" in arg:
+            opt_name, opt_value = arg[2:].split("=", 1)
+            if opt_name.lower() == "proxyjump":
+                jump_chain = _split_jump(opt_value)
+            elif opt_name.lower() == "port":
+                try:
+                    port = int(opt_value)
+                except ValueError:
+                    pass
+        elif not arg.startswith("-") and target is None:
+            # first positional target
+            target = arg
+            if mode != "scp":
+                break
+        idx += 1
+    if mode == "scp" and target is None:
+        for arg in argv:
+            if ":" in arg:
+                target = arg
+                break
+    real_target = _extract_target(target) if target else None
+    return Invocation(binary=mode, args=argv, target=real_target, port=port, jump_chain=jump_chain)
+
+
+def _collect_fingerprint(target: str, port: int) -> str:
+    try:
+        proc = subprocess.run(
+            ["ssh-keyscan", "-T", "5", "-p", str(port), target],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode == 0 and proc.stdout:
+            line = proc.stdout.strip().splitlines()[0]
+            parts = line.split()
+            if len(parts) >= 3:
+                return parts[2]
+    except FileNotFoundError:
+        pass
+    return ""
+
+
+def _record(invocation: Invocation) -> None:
+    if invocation.target is None:
+        return
+    fingerprint = _collect_fingerprint(invocation.target, invocation.port)
+    cmd = [
+        HOSTCTL_BIN,
+        "record",
+        "--target",
+        invocation.target,
+        "--port",
+        str(invocation.port),
+    ]
+    if invocation.jump_chain:
+        cmd.extend(["--jump-chain", *invocation.jump_chain])
+    if fingerprint:
+        cmd.extend(["--fingerprint", fingerprint])
+    try:
+        subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        pass
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("Usage: codex-ssh-wrapper <ssh|scp|sftp> ...", file=sys.stderr)
+        return 1
+    mode = sys.argv[1]
+    argv = sys.argv[2:]
+    original_path = os.path.join(ORIGINAL_DIR, mode)
+    if not os.path.exists(original_path):
+        print(f"Original binary for {mode} not found at {original_path}", file=sys.stderr)
+        return 1
+    invocation = _parse_options(argv, mode=mode)
+    _record(invocation)
+    os.execv(original_path, [original_path, *argv])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

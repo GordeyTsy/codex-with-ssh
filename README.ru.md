@@ -1,69 +1,91 @@
-# Развёртывание SSH-бастиона Codex
+# Codex SSH Bastion
 
-*English version: see [README.md](README.md).*  
-*Подробные значения переменных и примеры находятся в [AGENTS.md — Подготовка кластера](AGENTS.md#подготовка-кластера) и [AGENTS.md — Подготовка workspace](AGENTS.md#подготовка-workspace).* 
+*English documentation is available in [README.md](README.md).*  
+Репозиторий поднимает SSH-бастион в кластере Kubernetes и содержит готовый контейнерный образ с учётом требований Codex.
 
-## 1. Архитектура и поток трафика
-- **Многопрыжковая цепочка.** Рабочее пространство Codex инициирует SSH (при необходимости через корпоративный прокси), выходит на публичную HTTPS-точку `<keen-dns-domain>`, далее попадает на закреплённый NodePort `<node-ip>:<node-port>`, входит в Pod SSH-бастиона и уже оттуда прыгает к целевой инфраструктуре через объявленные ProxyJump-цепочки.
-- **Роль Pod-а.** Бастион принимает входящие SSH-сессии, применяет политики промежуточных переходов, формирует инвентаризацию для пользователей workspace, публикует проверки работоспособности и сохраняет телеметрию в `reports/`. Он работает с образом из `SSH_BASTION_IMAGE`, учитывая переопределения реестра через `SSH_IMAGE_REGISTRY`.
-- **Автоматический захват маршрутов.** В workspace устанавливается обёртка `ssh`, которая фиксирует каждую успешную последовательность прыжков, экспортирует их в `reports/ssh-routes.json` и обновляет уведомления в `AGENTS.md`, чтобы новые сессии использовали ту же топологию.
-- **Набор скриптов.**
-  - `scripts/deploy-ssh-bastion.sh` разворачивает Pod, сервис и конфигурационные карты с учётом переменных ниже.
-  - `scripts/setup-codex-workspace.sh` готовит окружение Codex, записывает SSH-конфиги, загружает секреты и регистрирует прокси-коннектор.
-  - `scripts/codex-hostctl` управляет алиасами хостов, ProxyJump-цепочками и синхронизацией метаданных между workspace и репозиторием.
+## 1. Состав
+- **Образ** – каталог [`images/ssh-bastion/`](images/ssh-bastion/) содержит Dockerfile, entrypoint, CLI `codex-hostctl` и обёртки `ssh/scp/sftp`.
+- **Манифесты** – шаблоны в [`manifests/ssh-bastion/`](manifests/ssh-bastion/) описывают Namespace, PVC, ConfigMap, Deployment и Service. Они параметризуются скриптом `deploy-ssh-bastion.sh`.
+- **Хранилище** – PVC (`/var/lib/codex-ssh`) держит инвентарь подключений и пользовательские метки, поэтому данные переживают рестарт пода.
+- **Скрипты** – [`scripts/deploy-ssh-bastion.sh`](scripts/deploy-ssh-bastion.sh) применяет манифесты и при необходимости обновляет секрет `authorized_keys`.
 
-## 2. Секреты и требования к переменным окружения
-### 2.1 Общие входные данные
-| Имя | Область | Описание |
+## 2. Поведение контейнера
+Entry-point выполняет:
+1. Создание системного пользователя `codex`, подготовку директории `/var/lib/codex-ssh` с правами `0700` и файлов `inventory.json`, `labels.json`.
+2. Копирование ключей из примонтированного секрета в `~codex/.ssh/authorized_keys` (права `600`).
+3. Перенос оригинальных `ssh`, `scp`, `sftp` в `/opt/codex-ssh/originals/` и замена их обёртками, которые перед запуском клиента записывают параметры подключения в инвентарь.
+4. Подключение сниппета `sshd_config` из ConfigMap, генерацию host-ключей и обновление MOTD на основе `codex-hostctl motd`.
+5. Запуск OpenSSH (`/usr/sbin/sshd -D -e`). В конфигурации выключены парольная аутентификация, root-доступ и X11; разрешён только пользователь `codex`.
+
+### 2.1 CLI `codex-hostctl`
+- `codex-hostctl record` – служебная команда, вызывается обёртками для фиксации подключения.
+- `codex-hostctl list` – табличный список (id, имя, цель, порт, цепочка jump, fingerprint, `last_seen`).
+- `codex-hostctl export` – JSON для синхронизации с рабочим пространством.
+- `codex-hostctl rename <id> <name>` – присвоение читаемого имени (пустое значение удаляет метку).
+- `codex-hostctl motd` – текст для `/etc/motd` (используется entrypoint’ом).
+
+## 3. Развёртывание
+```bash
+SSH_NAMESPACE=codex-ssh \
+SSH_SERVICE_NODE_PORT=32222 \
+SSH_IMAGE_REGISTRY=ghcr.io/gordeytsy \
+SSH_BASTION_IMAGE=codex-ssh-bastion:latest \
+SSH_AUTHORIZED_SECRET=ssh-authorized-keys \
+SSH_AUTHORIZED_KEYS_FILE=./authorized_keys \
+scripts/deploy-ssh-bastion.sh
+```
+
+Скрипт создаёт временные файлы, прогоняет их через `envsubst` и применяет `kubectl apply`. При наличии `SSH_AUTHORIZED_KEYS_FILE` секрет перегенерируется автоматически. После выполнения вы увидите подсказки по проверке rollout, сервису, тестовому `ssh` и обновлению секрета.
+
+### 3.1 Переменные окружения
+| Переменная | Значение по умолчанию | Описание |
 | --- | --- | --- |
-| `SSH_KEY` | Секрет | Приватный ключ workspace для аутентификации на бастионе. Храните его в хранилище секретов проекта; публичная часть должна быть в `authorized_keys` бастиона. |
+| `SSH_NAMESPACE` | `codex-ssh` | Namespace для всех объектов. |
+| `SSH_DEPLOYMENT_NAME` | `ssh-bastion` | Имя Deployment. |
+| `SSH_SERVICE_NAME` | `ssh-bastion` | Имя Service. |
+| `SSH_SERVICE_TYPE` | `NodePort` | Тип сервиса (`NodePort`, `LoadBalancer`, `ClusterIP`). |
+| `SSH_SERVICE_NODE_PORT` | `32222` | Фиксированный NodePort; используется только при `SSH_SERVICE_TYPE=NodePort`. |
+| `SSH_PVC_NAME` | `codex-ssh-data` | Имя PersistentVolumeClaim. |
+| `SSH_PVC_SIZE` | `1Gi` | Запрашиваемый объём диска. |
+| `SSH_STORAGE_CLASS` | — | StorageClass. Оставьте пустым для значения по умолчанию. |
+| `SSH_CONFIGMAP_NAME` | `ssh-bastion-config` | Имя ConfigMap с MOTD и `sshd_config`. |
+| `SSH_AUTHORIZED_SECRET` | `ssh-authorized-keys` | Секрет с публичными ключами. |
+| `SSH_BASTION_IMAGE` | `codex-ssh-bastion:latest` | Имя и тег образа без префикса реестра. |
+| `SSH_IMAGE_REGISTRY` | — | Префикс реестра (`registry.example.com/team`). |
+| `SSH_MOTD_CONTENT` | `Codex SSH bastion
+Используйте codex-hostctl list, чтобы увидеть найденные цели.` | Базовое сообщение MOTD. |
+| `SSH_AUTHORIZED_KEYS_FILE` | — | Путь до `authorized_keys`; при указании секрет обновится автоматически. |
 
-### 2.2 Переменные администратора
-| Имя | Значение по умолчанию | Назначение |
-| --- | --- | --- |
-| `SSH_NAMESPACE` | `codex-ssh` | Namespace, содержащий развёртывание бастиона. |
-| `SSH_DEPLOYMENT_NAME` | `codex-ssh` | Имя deployment-а, по которому отслеживается статус раскатки. |
-| `SSH_SERVICE_NAME` | `codex-ssh` | Сервис, публикующий Pod на `<node-ip>:<node-port>`. |
-| `SSH_SERVICE_TYPE` | `NodePort` | Тип сервиса, через который доступен Pod. |
-| `SSH_SERVICE_NODE_PORT` | — | Закреплённый NodePort, передаваемый в workspace (плейсхолдер `<node-port>` при незаданном значении). |
-| `SSH_BASTION_IMAGE` | См. AGENTS | Контейнерный образ для Pod-а. |
-| `SSH_IMAGE_REGISTRY` | Опционально | Переопределение реестра при загрузке образа (см. раздел 5). |
-
-### 2.3 Переменные workspace
-| Имя | Источник | Описание |
-| --- | --- | --- |
-| `SSH_BASTION_HOST` | Секрет или переменная | Внешнее имя бастиона (в документации используйте `<keen-dns-domain>`). |
-| `SSH_BASTION_PORT` | Секрет или переменная | Публичный NodePort, используемый workspace (плейсхолдер `<node-port>`). |
-| `SSH_BASTION_USER` | Секрет или переменная | Имя пользователя на бастионе, связанное с ключом `SSH_KEY`. |
-| `SSH_BASTION_ENDPOINT` | Производная | Полная строка `user@host:port`, которую собирают вспомогательные скрипты; переопределяйте только при нестандартной маршрутизации. |
-| `SSH_PROXY_URL` | Секрет | URL корпоративного прокси, через который должен идти workspace. Не задавайте, если обход не требуется. |
-| `SSH_PROXY_CONNECT_LOG` | Переменная | Путь к логам прокси-коннектора (по умолчанию `reports/ssh-proxy.log`). |
-
-## 3. Последовательность настройки
-### 3.1 Дорожная карта администратора
-1. Сгенерируйте ключевую пару SSH для workspace и пропишите публичную часть в конфигурации бастиона.
-2. Экспортируйте необходимые переменные (см. раздел 2.2 и AGENTS) и выполните `scripts/deploy-ssh-bastion.sh` с машины, имеющей доступ к кластеру. Скрипт создаст все объекты, опубликует NodePort и сохранит метаданные подключения в `reports/`.
-3. Передайте поддержке workspace плейсхолдеры `<keen-dns-domain>` и `<node-port>`. Конкретные значения храните вне репозитория и фиксируйте в [AGENTS.md](AGENTS.md) для внутреннего пользования.
-
-### 3.2 Дорожная карта workspace
-1. Занесите `SSH_KEY`, `SSH_PROXY_URL` и набор `SSH_BASTION_*` в раздел секретов проекта Codex.
-2. Запускайте `scripts/setup-codex-workspace.sh` как установочный и обслуживающий хук. Помощник обновит `scripts/codex-hostctl`, установит обёртку `ssh`, пересоберёт `~/.ssh/config` и запишет ProxyJump-цепочки в `reports/ssh-inventory.md`.
-3. Проверьте импортированные алиасы командой `scripts/codex-hostctl list`. Переименовывайте записи через `scripts/codex-hostctl rename <old> <new>`; каждое выполнение автоматически обновляет сводку в `AGENTS.md` workspace.
-4. При появлении новых целевых систем перезапускайте скрипт, чтобы обновить трассировки маршрутов, инвентарь и заметки в AGENTS.
-
-## 4. Интеграция с корпоративным прокси
-- **Архитектура коннектора.** В `~/.ssh/config` прописывается `ProxyCommand`, который вызывает локальный коннектор. Он устанавливает HTTPS CONNECT к `SSH_PROXY_URL`, после чего прозрачно прокидывает SSH-трафик, не раскрывая учётные данные.
-- **Необходимые параметры.** Укажите `SSH_PROXY_URL` (например, `https://<proxy-host>:<proxy-port>`). Дополнительно можно задать `SSH_PROXY_CONNECT_LOG` для расположения логов, `SSH_PROXY_SOCKET` для выбора Unix-сокета и `SSH_PROXY_STRICT=1`, чтобы падать при любой ошибке подключения.
-- **Поведение обёртки `ssh`.** Все SSH-вызовы workspace идут через `scripts/ssh-wrapper`, установленный `setup-codex-workspace.sh`. Обёртка подставляет нужный `ProxyCommand`, отслеживает успешные многопрыжковые цепочки и добавляет подробные трассировки в `reports/ssh-routes.json` и файл логов прокси.
-- **Диагностика.** Анализируйте `reports/ssh-proxy.log` для просмотра работы коннектора и проверяйте `reports/ssh-routes.json` для подтверждения построенных маршрутов. Скрипт настройки также переносит актуальный статус в `AGENTS.md` проекта.
-
-## 5. Ручная сборка образа и настройка реестра
-1. Подготовьте рабочую директорию с манифестами из `manifests/` и Dockerfile, соответствующим требованиям SSH-бастиона.
-2. Соберите образ локально, например:
+## 4. Обновление `authorized_keys`
+1. Подготовьте файл с публичными ключами.
+2. Выполните:
    ```bash
-   docker build -t <registry>/<name>:tag .
+   kubectl -n ${SSH_NAMESPACE:-codex-ssh} create secret generic ${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys} \
+     --from-file=authorized_keys=./authorized_keys --dry-run=client -o yaml | kubectl apply -f -
    ```
-3. Отправьте образ в свой реестр и экспортируйте `SSH_BASTION_IMAGE=<registry>/<name>:tag`, а также `SSH_IMAGE_REGISTRY=<registry>`, если кластер требует явного указания реестра.
-4. Зафиксируйте выбранный реестр, тег и параметры развёртывания в [AGENTS.md — Подготовка кластера](AGENTS.md#подготовка-кластера), чтобы последующие администраторы использовали согласованные значения.
+3. При необходимости перезапустите Deployment (`kubectl rollout restart`). Entry-point проверит наличие и права файла, сообщения об ошибках появятся в `kubectl logs`.
 
-В этом README используются плейсхолдеры (`<keen-dns-domain>`, `<node-ip>`, `<node-port>`) для скрытия чувствительных данных. Подставляйте реальные значения только в закрытых каналах и следуйте рекомендациям из [AGENTS.md](AGENTS.md).
+## 5. Инвентарь и переименования
+- `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl list`
+- `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl rename srv-01:22 prod-srv-01`
+- `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl export > inventory.json`
+
+Обёртки `ssh`, `scp`, `sftp` регистрируют подключения автоматически, анализируя параметры `-J`, `-p/-P`, `-o ProxyJump`. Fingerprint заполняется через `ssh-keyscan` (таймаут 5 секунд). Все изменения пишутся в PVC и сохраняются между рестартами.
+
+## 6. Безопасность
+- Включён только пользователь `codex`; парольная аутентификация отключена.
+- `AuthorizedKeysFile` указывает на файл из секрета; права корректируются entrypoint’ом.
+- Проброшены только 22-й порт контейнера и NodePort/LoadBalancer сервиса.
+- MOTD напоминает об экспортных командах и о `codex-hostctl rename`.
+
+## 7. Интеграция с Codex Workspace
+- Храните приватный ключ в секрете Codex (`SSH_KEY`), публичный ключ – в Kubernetes-секрете `authorized_keys`.
+- Рабочее пространство может синхронизировать список целей с помощью `codex-hostctl export` (через `kubectl exec`).
+- Для пользовательских меток используйте `codex-hostctl rename`; их значение сохраняется в `labels.json`.
+
+## 8. Сборка образа
+После обновления исходников обязательно соберите образ:
+```bash
+docker build -t "${SSH_IMAGE_REGISTRY:-<public-registry>}/codex-ssh-bastion:latest" images/ssh-bastion
+```
+и опубликуйте его в вашем реестре, прежде чем обновлять Deployment.

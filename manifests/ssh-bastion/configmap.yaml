@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${SSH_CONFIGMAP_NAME}
+  namespace: ${SSH_NAMESPACE}
+data:
+  motd: |
+${SSH_MOTD_CONTENT_BLOCK}
+  sshd_config: |
+    Port 22
+    AllowUsers codex
+    PasswordAuthentication no
+    PermitRootLogin no
+    AllowAgentForwarding no
+    AllowTcpForwarding yes
+    X11Forwarding no
+    AllowStreamLocalForwarding no
+    ClientAliveInterval 120
+    ClientAliveCountMax 2
+    AuthorizedKeysFile /home/codex/.ssh/authorized_keys
+    Subsystem sftp internal-sftp

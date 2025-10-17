@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${SSH_PVC_NAME}
+  namespace: ${SSH_NAMESPACE}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: ${SSH_PVC_SIZE}
+${SSH_STORAGE_CLASS_BLOCK}
