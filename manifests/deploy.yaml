@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-api-gw
+  namespace: k8s-gw
+  labels:
+    app: k8s-api-gw
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: k8s-api-gw
+  template:
+    metadata:
+      labels:
+        app: k8s-api-gw
+    spec:
+      serviceAccountName: __SERVICE_ACCOUNT_NAME__
+      containers:
+      - name: nginx
+        image: nginx:1.25-alpine
+        args: ["nginx", "-g", "daemon off;", "-c", "/etc/nginx/nginx.conf"]
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /.well-known/apiserver/healthz
+            port: 8080
+            scheme: HTTP
+__HEALTHZ_PROBE_HEADERS__
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /.well-known/apiserver/healthz
+            port: 8080
+            scheme: HTTP
+__HEALTHZ_PROBE_HEADERS__
+          initialDelaySeconds: 10
+          periodSeconds: 20
+          timeoutSeconds: 5
+        volumeMounts:
+        - name: conf
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: kube-ca
+          mountPath: /etc/ssl/kube/ca.crt
+          subPath: ca.crt
+          readOnly: true
+      volumes:
+      - name: conf
+        configMap:
+          name: nginx-conf
+          items:
+          - key: nginx.conf
+            path: nginx.conf
+      - name: kube-ca
+        secret:
+          secretName: cluster-ca
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-api-gw
+  namespace: k8s-gw
+spec:
+  selector:
+    app: k8s-api-gw
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+__NODE_PORT_BLOCK__
+  type: __SERVICE_TYPE__

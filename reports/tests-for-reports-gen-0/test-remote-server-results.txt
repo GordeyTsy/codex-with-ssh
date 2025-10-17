@@ -1,0 +1,1590 @@
+root@main-vpn-fr:~# ./test-remote-server.sh
+### Remote diagnostics started at %Y-%m-%dT%H:%M:%SZ
+### Using kubectl context: team-a-dev@kubernetes
+
+>>> env | grep -i proxy || true
+
+>>> echo $HTTPS_PROXY
+
+
+>>> echo $NO_PROXY
+
+
+>>> echo $REQUESTS_CA_BUNDLE
+
+
+>>> kubectl --context "team-a-dev@kubernetes" config current-context
+team-a-dev@kubernetes
+
+>>> kubectl --context "team-a-dev@kubernetes" cluster-info
+Kubernetes control plane is running at https://62.118.136.124:10443
+CoreDNS is running at https://62.118.136.124:10443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+
+>>> kubectl --context "team-a-dev@kubernetes" get nodes -o wide
+NAME          STATUS     ROLES           AGE    VERSION   INTERNAL-IP     EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION      CONTAINER-RUNTIME
+glaptop       NotReady   <none>          230d   v1.32.1   10.0.70.171     <none>        Ubuntu 22.04.5 LTS   6.8.0-52-generic    containerd://2.0.1
+gt-dell-730   Ready      <none>          129d   v1.33.1   192.168.1.115   <none>        Ubuntu 24.04.3 LTS   6.8.0-79-generic    containerd://2.0.3
+gt-pc         Ready      <none>          223d   v1.32.2   10.0.70.69      <none>        Ubuntu 24.04.3 LTS   6.14.0-33-generic   containerd://2.0.2
+k8s-hdd       Ready      control-plane   264d   v1.32.0   10.0.70.200     <none>        Ubuntu 24.04.1 LTS   6.8.0-85-generic    containerd://1.7.24
+ro-pc         NotReady   <none>          216d   v1.32.2   10.0.70.70      <none>        Ubuntu 24.04.2 LTS   6.11.0-19-generic   containerd://2.0.3
+
+>>> kubectl --context "team-a-dev@kubernetes" get pods -A -o wide
+NAMESPACE          NAME                                       READY   STATUS             RESTARTS          AGE     IP                NODE          NOMINATED NODE   READINESS GATES
+autok8s            autok8s-couchdb-66dfccb666-npqhd           1/1     Running            1 (41h ago)       41h     192.168.18.124    gt-dell-730   <none>           <none>
+calico-apiserver   calico-apiserver-7d4795b97f-2bdzl          1/1     Running            20                264d    192.168.215.214   k8s-hdd       <none>           <none>
+calico-apiserver   calico-apiserver-7d4795b97f-dqlkx          1/1     Running            19 (8h ago)       264d    192.168.215.252   k8s-hdd       <none>           <none>
+calico-system      calico-kube-controllers-59f996c5d7-gbg44   1/1     Running            17 (8h ago)       264d    192.168.215.213   k8s-hdd       <none>           <none>
+calico-system      calico-node-2vztl                          1/1     Running            3 (8h ago)        113d    10.0.70.200       k8s-hdd       <none>           <none>
+calico-system      calico-node-6qklt                          1/1     Running            13                124d    192.168.1.115     gt-dell-730   <none>           <none>
+calico-system      calico-node-8z2ht                          1/1     Terminating        2 (209d ago)      216d    10.0.70.70        ro-pc         <none>           <none>
+calico-system      calico-node-fk8r7                          1/1     Running            13 (47h ago)      129d    10.0.70.69        gt-pc         <none>           <none>
+calico-system      calico-node-q7kfg                          1/1     Terminating        2 (216d ago)      230d    10.0.70.171       glaptop       <none>           <none>
+calico-system      calico-typha-6675779df8-cx6m8              1/1     Running            18 (8h ago)       264d    10.0.70.200       k8s-hdd       <none>           <none>
+calico-system      calico-typha-6675779df8-dkwq7              1/1     Running            14                129d    192.168.1.115     gt-dell-730   <none>           <none>
+calico-system      calico-typha-6675779df8-rrvwl              1/1     Running            106 (47h ago)     221d    10.0.70.69        gt-pc         <none>           <none>
+calico-system      csi-node-driver-6h8g7                      2/2     Running            4 (216d ago)      230d    192.168.169.72    glaptop       <none>           <none>
+calico-system      csi-node-driver-ddwl6                      2/2     Running            4 (209d ago)      216d    192.168.85.143    ro-pc         <none>           <none>
+calico-system      csi-node-driver-gfhc5                      2/2     Running            34 (8h ago)       264d    192.168.215.247   k8s-hdd       <none>           <none>
+calico-system      csi-node-driver-m4xgh                      2/2     Running            26                129d    192.168.18.99     gt-dell-730   <none>           <none>
+calico-system      csi-node-driver-sqsbw                      2/2     Running            238 (47h ago)     223d    192.168.116.190   gt-pc         <none>           <none>
+default            dnscrypt-proxy-87654c849-fms4w             0/1     ImagePullBackOff   5 (8h ago)        222d    192.168.215.233   k8s-hdd       <none>           <none>
+default            k8s-workstation-567dcf588c-dn6rc           1/1     Running            13                127d    192.168.18.98     gt-dell-730   <none>           <none>
+default            mitmproxy-deployment-9b664fd98-zrnn5       1/1     Running            13                128d    192.168.18.95     gt-dell-730   <none>           <none>
+default            postgres-0                                 0/1     ImagePullBackOff   4 (8h ago)        222d    192.168.215.253   k8s-hdd       <none>           <none>
+default            web-deployment-7698c8fbdd-m6zhz            1/1     Running            13                128d    192.168.18.90     gt-dell-730   <none>           <none>
+kube-system        apiserver-proxy-f76fb87c-h9s99             1/1     Running            0                 7h44m   192.168.1.115     gt-dell-730   <none>           <none>
+kube-system        coredns-668d6bf9bc-57njj                   1/1     Running            17 (8h ago)       264d    192.168.215.216   k8s-hdd       <none>           <none>
+kube-system        coredns-668d6bf9bc-rgpmv                   1/1     Running            17 (8h ago)       264d    192.168.215.251   k8s-hdd       <none>           <none>
+kube-system        etcd-k8s-hdd                               1/1     Running            18 (8h ago)       264d    10.0.70.200       k8s-hdd       <none>           <none>
+kube-system        kube-apiserver-k8s-hdd                     1/1     Running            18 (8h ago)       264d    10.0.70.200       k8s-hdd       <none>           <none>
+kube-system        kube-controller-manager-k8s-hdd            1/1     Running            33 (8h ago)       264d    10.0.70.200       k8s-hdd       <none>           <none>
+kube-system        kube-proxy-6wvc7                           1/1     Running            2 (216d ago)      230d    10.0.70.171       glaptop       <none>           <none>
+kube-system        kube-proxy-bhzwd                           1/1     Running            2 (209d ago)      216d    10.0.70.70        ro-pc         <none>           <none>
+kube-system        kube-proxy-d6xmn                           1/1     Running            14                129d    192.168.1.115     gt-dell-730   <none>           <none>
+kube-system        kube-proxy-ghkrl                           1/1     Running            121 (47h ago)     223d    10.0.70.69        gt-pc         <none>           <none>
+kube-system        kube-proxy-nkp55                           1/1     Running            18 (8h ago)       264d    10.0.70.200       k8s-hdd       <none>           <none>
+kube-system        kube-scheduler-k8s-hdd                     1/1     Running            35 (8h ago)       264d    10.0.70.200       k8s-hdd       <none>           <none>
+kube-system        nvidia-device-plugin-daemonset-4r62x       0/1     CrashLoopBackOff   21210 (47s ago)   223d    192.168.116.188   gt-pc         <none>           <none>
+kube-system        nvidia-device-plugin-daemonset-hhmw5       1/1     Running            13                129d    192.168.18.94     gt-dell-730   <none>           <none>
+kube-system        nvidia-device-plugin-daemonset-mdnq9       1/1     Running            2 (209d ago)      216d    192.168.85.144    ro-pc         <none>           <none>
+kube-system        nvidia-device-plugin-daemonset-pf4jv       1/1     Running            7 (8h ago)        235d    192.168.215.211   k8s-hdd       <none>           <none>
+kube-system        nvidia-device-plugin-daemonset-vj24p       1/1     Running            2 (216d ago)      230d    192.168.169.73    glaptop       <none>           <none>
+tigera-operator    tigera-operator-7d68577dc5-b6dqn           1/1     Running            34 (8h ago)       264d    10.0.70.200       k8s-hdd       <none>           <none>
+
+>>> kubectl --context "team-a-dev@kubernetes" version --short
+error: unknown flag: --short
+See 'kubectl version --help' for usage.
+!!! command exited with status 0
+
+>>> kubectl --context "team-a-dev@kubernetes" version
+Client Version: v1.34.1
+Kustomize Version: v5.7.1
+Server Version: v1.32.1
+Warning: version difference between client (1.34) and server (1.32) exceeds the supported minor version skew of +/-1
+
+>>> kubectl --context "team-a-dev@kubernetes" version --client --short
+error: unknown flag: --short
+See 'kubectl version --help' for usage.
+!!! command exited with status 0
+
+>>> kubectl --context "team-a-dev@kubernetes" version --server --short
+Client Version: v1.34.1
+Kustomize Version: v5.7.1
+Unable to connect to the server: dial tcp: lookup --short: no such host
+!!! command exited with status 0
+
+>>> kubectl --context "team-a-dev@kubernetes" version --output=yaml
+clientVersion:
+  buildDate: "2025-09-09T19:44:50Z"
+  compiler: gc
+  gitCommit: 93248f9ae092f571eb870b7664c534bfc7d00f03
+  gitTreeState: clean
+  gitVersion: v1.34.1
+  goVersion: go1.24.6
+  major: "1"
+  minor: "34"
+  platform: linux/amd64
+kustomizeVersion: v5.7.1
+serverVersion:
+  buildDate: "2025-01-15T14:31:55Z"
+  compiler: gc
+  gitCommit: e9c9be4007d1664e68796af02b8978640d2c1b26
+  gitTreeState: clean
+  gitVersion: v1.32.1
+  goVersion: go1.23.4
+  major: "1"
+  minor: "32"
+  platform: linux/amd64
+
+Warning: version difference between client (1.34) and server (1.32) exceeds the supported minor version skew of +/-1
+
+>>> kubectl --context "team-a-dev@kubernetes" get --raw=/version
+{
+  "major": "1",
+  "minor": "32",
+  "gitVersion": "v1.32.1",
+  "gitCommit": "e9c9be4007d1664e68796af02b8978640d2c1b26",
+  "gitTreeState": "clean",
+  "buildDate": "2025-01-15T14:31:55Z",
+  "goVersion": "go1.23.4",
+  "compiler": "gc",
+  "platform": "linux/amd64"
+}
+>>> kubectl --context "team-a-dev@kubernetes" get --raw=/healthz
+ok
+>>> kubectl --context "team-a-dev@kubernetes" get --raw=/readyz
+ok
+>>> kubectl --context "team-a-dev@kubernetes" get --raw=/livez?verbose
+[+]ping ok
+[+]log ok
+[+]etcd ok
+[+]poststarthook/start-apiserver-admission-initializer ok
+[+]poststarthook/generic-apiserver-start-informers ok
+[+]poststarthook/priority-and-fairness-config-consumer ok
+[+]poststarthook/priority-and-fairness-filter ok
+[+]poststarthook/storage-object-count-tracker-hook ok
+[+]poststarthook/start-apiextensions-informers ok
+[+]poststarthook/start-apiextensions-controllers ok
+[+]poststarthook/crd-informer-synced ok
+[+]poststarthook/start-system-namespaces-controller ok
+[+]poststarthook/start-cluster-authentication-info-controller ok
+[+]poststarthook/start-kube-apiserver-identity-lease-controller ok
+[+]poststarthook/start-kube-apiserver-identity-lease-garbage-collector ok
+[+]poststarthook/start-legacy-token-tracking-controller ok
+[+]poststarthook/start-service-ip-repair-controllers ok
+[+]poststarthook/rbac/bootstrap-roles ok
+[+]poststarthook/scheduling/bootstrap-system-priority-classes ok
+[+]poststarthook/priority-and-fairness-config-producer ok
+[+]poststarthook/bootstrap-controller ok
+[+]poststarthook/aggregator-reload-proxy-client-cert ok
+[+]poststarthook/start-kube-aggregator-informers ok
+[+]poststarthook/apiservice-status-local-available-controller ok
+[+]poststarthook/apiservice-status-remote-available-controller ok
+[+]poststarthook/apiservice-registration-controller ok
+[+]poststarthook/apiservice-discovery-controller ok
+[+]poststarthook/kube-apiserver-autoregistration ok
+[+]autoregister-completion ok
+[+]poststarthook/apiservice-openapi-controller ok
+[+]poststarthook/apiservice-openapiv3-controller ok
+livez check passed
+
+>>> kubectl --context "team-a-dev@kubernetes" get --raw='/.well-known/openid-configuration'
+{"issuer":"https://kubernetes.default.svc.cluster.local","jwks_uri":"https://10.0.70.200:6443/openid/v1/jwks","response_types_supported":["id_token"],"subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"]}
+>>> kubectl --context "team-a-dev@kubernetes" get --raw=/openid/v1/jwks
+{"keys":[{"use":"sig","kty":"RSA","kid":"RkAYw6bupRhLXeb5pjgNz47Qw6RW4Yn6jRq0vuXOfGk","alg":"RS256","n":"uS23Obn4g-aWRgGyQBKPX-o6MeQRC-JcPd87IfkDSERhUZPTR6GrffW5l30Ecq5zTMPGNaxN4L88CfYubcmzweohB0Dl7erx5SnymzhsThT8rTVwSfqL6bm9q5uNRsecZK69n-zHf_BCr5Ynhu_qCp6VvCzlKpwsu1Pw8q8dm7AXY-R57pJ9SNZ5xQbXpB42o-4nEl0ygt420Lx3bVfuevh8kJzlEon1FkuT_6r_R-DwKzZl7KAOqNOgNeESgvwzZMqR_AkcE3Rti38TS-pyVo2p9CIoWREiV7qDcHGROR4V5V4JctMooruTt-wfhD1eAXIT59PpvoWgyVfVv55xxw","e":"AQAB"}]}
+>>> date && kubectl --context "team-a-dev@kubernetes" get --raw=/readyz
+Sun Oct 12 16:57:48 UTC 2025
+ok
+>>> dig +short kubernetes
+bash: line 1: dig: command not found
+!!! command exited with status 0
+
+>>> echo '### Testing API endpoint 62.118.136.124:10443'
+### Testing API endpoint 62.118.136.124:10443
+
+>>> openssl s_client -connect 62.118.136.124:10443 -servername kubernetes -showcerts </dev/null
+CONNECTED(00000003)
+depth=0 CN = kube-apiserver
+verify error:num=20:unable to get local issuer certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify error:num=21:unable to verify the first certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify return:1
+---
+Certificate chain
+ 0 s:CN = kube-apiserver
+   i:CN = kubernetes
+   a:PKEY: rsaEncryption, 2048 (bit); sigalg: RSA-SHA256
+   v:NotBefore: Oct 12 14:50:41 2025 GMT; NotAfter: Oct 12 14:55:41 2026 GMT
+-----BEGIN CERTIFICATE-----
+MIIDkzCCAnugAwIBAgIHEXxrUQH5pzANBgkqhkiG9w0BAQsFADAVMRMwEQYDVQQD
+EwprdWJlcm5ldGVzMB4XDTI1MTAxMjE0NTA0MVoXDTI2MTAxMjE0NTU0MVowGTEX
+MBUGA1UEAxMOa3ViZS1hcGlzZXJ2ZXIwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAw
+ggEKAoIBAQDIuWXpPtl/2l+SJhs0cFbzyB9NZHWQvFLBEO9BJ8dcVbmKYi53cVcd
+XoQZaYx40H+Cy9pK5v6RZbJyJgEi9ZQJ3ijvJ0+WHFBrCDhysWqpQKx+lBv7vtc8
+GYC8HTkaZ+5/wQZzayijFeD+s9zVP6jek+waJY8Q0tRQU7OR8ofpfjbif6SU0cb6
+I6jWXZ5Q1aoTks/ZMPXJ71lwrjVIxb/S38Et6C5DqAp1Sl5m4PzHELiwicF+zbej
+5Kvh53LV35rzGlcjl7FBmPcmTlgVylSF7oK6/x9IxgFcrF04lZffIe2HtsW8KqUP
+CtVVsxrqXyc76bDL4m6ByBMb/HeR/68bAgMBAAGjgeMwgeAwDgYDVR0PAQH/BAQD
+AgWgMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgw
+FoAUblUr8WJoaZ1yE373mWdPQfEeX4AwgYkGA1UdEQSBgTB/ggdrOHMtaGRkggpr
+dWJlcm5ldGVzghJrdWJlcm5ldGVzLmRlZmF1bHSCFmt1YmVybmV0ZXMuZGVmYXVs
+dC5zdmOCJGt1YmVybmV0ZXMuZGVmYXVsdC5zdmMuY2x1c3Rlci5sb2NhbIcECmAA
+AYcECgBGyIcEPnaIfIcEwaSbWTANBgkqhkiG9w0BAQsFAAOCAQEAf9NyKBVENLao
+vNoJJelzl25bJZqNBKPI3AAFXh12rAF+LudXH5M8ZUd8vZZMXziA5Ocj+R69GEis
+nK7W2vbjQuBWftu0ok1IJ9tnWcZYL3YhX9R7QQvD1rlo4x7YOPkqOf1iljmaVRzF
+C02zb3BJGN6N+fB1igwd1LNbpGY+Ij8K8m5PbQ8UvZwO501Yz4ikToeT98GEQIJ1
+yzXb3qCzYuadXL1WCLPlo65EyIdMOLcwSaL1q+U9OybESmprlgbKxDy76VDmmYKB
+B0uaCAG60oTlV3L2hTBxsMWa0uF9GfKrs3e2CGwf1qZQYEO0MsvABYupTzCC7vli
+c4e8HCPACg==
+-----END CERTIFICATE-----
+---
+Server certificate
+subject=CN = kube-apiserver
+issuer=CN = kubernetes
+---
+Acceptable client certificate CA names
+CN = kubernetes
+CN = front-proxy-ca
+Requested Signature Algorithms: RSA-PSS+SHA256:ECDSA+SHA256:Ed25519:RSA-PSS+SHA384:RSA-PSS+SHA512:RSA+SHA256:RSA+SHA384:RSA+SHA512:ECDSA+SHA384:ECDSA+SHA512:RSA+SHA1:ECDSA+SHA1
+Shared Requested Signature Algorithms: RSA-PSS+SHA256:ECDSA+SHA256:Ed25519:RSA-PSS+SHA384:RSA-PSS+SHA512:RSA+SHA256:RSA+SHA384:RSA+SHA512:ECDSA+SHA384:ECDSA+SHA512
+Peer signing digest: SHA256
+Peer signature type: RSA-PSS
+Server Temp Key: X25519, 253 bits
+---
+SSL handshake has read 1586 bytes and written 406 bytes
+Verification error: unable to verify the first certificate
+---
+New, TLSv1.3, Cipher is TLS_AES_128_GCM_SHA256
+Server public key is 2048 bit
+Secure Renegotiation IS NOT supported
+Compression: NONE
+Expansion: NONE
+No ALPN negotiated
+Early data was not sent
+Verify return code: 21 (unable to verify the first certificate)
+---
+DONE
+
+>>> openssl s_client -connect 62.118.136.124:10443 -servername kubernetes -showcerts </dev/null | openssl x509 -noout -issuer -subject -ext subjectAltName
+depth=0 CN = kube-apiserver
+verify error:num=20:unable to get local issuer certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify error:num=21:unable to verify the first certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify return:1
+DONE
+issuer=CN = kubernetes
+subject=CN = kube-apiserver
+X509v3 Subject Alternative Name:
+    DNS:k8s-hdd, DNS:kubernetes, DNS:kubernetes.default, DNS:kubernetes.default.svc, DNS:kubernetes.default.svc.cluster.local, IP Address:10.96.0.1, IP Address:10.0.70.200, IP Address:62.118.136.124, IP Address:193.164.155.89
+
+>>> openssl s_client -connect 62.118.136.124:10443 -showcerts </dev/null | openssl x509 -noout -text
+Can't use SSL_get_servername
+depth=0 CN = kube-apiserver
+verify error:num=20:unable to get local issuer certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify error:num=21:unable to verify the first certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify return:1
+DONE
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 4921874966509991 (0x117c6b5101f9a7)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: CN = kubernetes
+        Validity
+            Not Before: Oct 12 14:50:41 2025 GMT
+            Not After : Oct 12 14:55:41 2026 GMT
+        Subject: CN = kube-apiserver
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+                    00:c8:b9:65:e9:3e:d9:7f:da:5f:92:26:1b:34:70:
+                    56:f3:c8:1f:4d:64:75:90:bc:52:c1:10:ef:41:27:
+                    c7:5c:55:b9:8a:62:2e:77:71:57:1d:5e:84:19:69:
+                    8c:78:d0:7f:82:cb:da:4a:e6:fe:91:65:b2:72:26:
+                    01:22:f5:94:09:de:28:ef:27:4f:96:1c:50:6b:08:
+                    38:72:b1:6a:a9:40:ac:7e:94:1b:fb:be:d7:3c:19:
+                    80:bc:1d:39:1a:67:ee:7f:c1:06:73:6b:28:a3:15:
+                    e0:fe:b3:dc:d5:3f:a8:de:93:ec:1a:25:8f:10:d2:
+                    d4:50:53:b3:91:f2:87:e9:7e:36:e2:7f:a4:94:d1:
+                    c6:fa:23:a8:d6:5d:9e:50:d5:aa:13:92:cf:d9:30:
+                    f5:c9:ef:59:70:ae:35:48:c5:bf:d2:df:c1:2d:e8:
+                    2e:43:a8:0a:75:4a:5e:66:e0:fc:c7:10:b8:b0:89:
+                    c1:7e:cd:b7:a3:e4:ab:e1:e7:72:d5:df:9a:f3:1a:
+                    57:23:97:b1:41:98:f7:26:4e:58:15:ca:54:85:ee:
+                    82:ba:ff:1f:48:c6:01:5c:ac:5d:38:95:97:df:21:
+                    ed:87:b6:c5:bc:2a:a5:0f:0a:d5:55:b3:1a:ea:5f:
+                    27:3b:e9:b0:cb:e2:6e:81:c8:13:1b:fc:77:91:ff:
+                    af:1b
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Key Usage: critical
+                Digital Signature, Key Encipherment
+            X509v3 Extended Key Usage:
+                TLS Web Server Authentication
+            X509v3 Basic Constraints: critical
+                CA:FALSE
+            X509v3 Authority Key Identifier:
+                6E:55:2B:F1:62:68:69:9D:72:13:7E:F7:99:67:4F:41:F1:1E:5F:80
+            X509v3 Subject Alternative Name:
+                DNS:k8s-hdd, DNS:kubernetes, DNS:kubernetes.default, DNS:kubernetes.default.svc, DNS:kubernetes.default.svc.cluster.local, IP Address:10.96.0.1, IP Address:10.0.70.200, IP Address:62.118.136.124, IP Address:193.164.155.89
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
+        7f:d3:72:28:15:44:34:b6:a8:bc:da:09:25:e9:73:97:6e:5b:
+        25:9a:8d:04:a3:c8:dc:00:05:5e:1d:76:ac:01:7e:2e:e7:57:
+        1f:93:3c:65:47:7c:bd:96:4c:5f:38:80:e4:e7:23:f9:1e:bd:
+        18:48:ac:9c:ae:d6:da:f6:e3:42:e0:56:7e:db:b4:a2:4d:48:
+        27:db:67:59:c6:58:2f:76:21:5f:d4:7b:41:0b:c3:d6:b9:68:
+        e3:1e:d8:38:f9:2a:39:fd:62:96:39:9a:55:1c:c5:0b:4d:b3:
+        6f:70:49:18:de:8d:f9:f0:75:8a:0c:1d:d4:b3:5b:a4:66:3e:
+        22:3f:0a:f2:6e:4f:6d:0f:14:bd:9c:0e:e7:4d:58:cf:88:a4:
+        4e:87:93:f7:c1:84:40:82:75:cb:35:db:de:a0:b3:62:e6:9d:
+        5c:bd:56:08:b3:e5:a3:ae:44:c8:87:4c:38:b7:30:49:a2:f5:
+        ab:e5:3d:3b:26:c4:4a:6a:6b:96:06:ca:c4:3c:bb:e9:50:e6:
+        99:82:81:07:4b:9a:08:01:ba:d2:84:e5:57:72:f6:85:30:71:
+        b0:c5:9a:d2:e1:7d:19:f2:ab:b3:77:b6:08:6c:1f:d6:a6:50:
+        60:43:b4:32:cb:c0:05:8b:a9:4f:30:82:ee:f9:62:73:87:bc:
+        1c:23:c0:0a
+
+>>> curl -vk "https://62.118.136.124:10443/"
+*   Trying 62.118.136.124:10443...
+* Connected to 62.118.136.124 (62.118.136.124) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://62.118.136.124:10443/
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 62.118.136.124:10443]
+* [HTTP/2] [1] [:path: /]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET / HTTP/2
+> Host: 62.118.136.124:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: 1ee503cb-eb40-49f5-bb64-f2ab069c801f
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 217
+< date: Sun, 12 Oct 2025 16:57:50 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://62.118.136.124:10443/api"
+*   Trying 62.118.136.124:10443...
+* Connected to 62.118.136.124 (62.118.136.124) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://62.118.136.124:10443/api
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 62.118.136.124:10443]
+* [HTTP/2] [1] [:path: /api]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /api HTTP/2
+> Host: 62.118.136.124:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: 1a1b9d76-cf71-4e73-a028-209dae09258c
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 220
+< date: Sun, 12 Oct 2025 16:57:50 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/api\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://62.118.136.124:10443/healthz"
+*   Trying 62.118.136.124:10443...
+* Connected to 62.118.136.124 (62.118.136.124) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://62.118.136.124:10443/healthz
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 62.118.136.124:10443]
+* [HTTP/2] [1] [:path: /healthz]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /healthz HTTP/2
+> Host: 62.118.136.124:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 200
+< audit-id: d7181fb3-300b-4219-a78b-e761b21156a3
+< cache-control: no-cache, private
+< content-type: text/plain; charset=utf-8
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 3d7763aa-009b-44be-ad52-4b755c8e3a96
+< x-kubernetes-pf-prioritylevel-uid: e1d6cc84-67c8-422c-b631-88403bc612ae
+< content-length: 2
+< date: Sun, 12 Oct 2025 16:57:51 GMT
+<
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+ok
+>>> curl -vk "https://62.118.136.124:10443/livez?verbose"
+*   Trying 62.118.136.124:10443...
+* Connected to 62.118.136.124 (62.118.136.124) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://62.118.136.124:10443/livez?verbose
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 62.118.136.124:10443]
+* [HTTP/2] [1] [:path: /livez?verbose]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /livez?verbose HTTP/2
+> Host: 62.118.136.124:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 200
+< audit-id: 9ad7d51a-d35e-4766-b624-59c4f221c9bd
+< cache-control: no-cache, private
+< content-type: text/plain; charset=utf-8
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 3d7763aa-009b-44be-ad52-4b755c8e3a96
+< x-kubernetes-pf-prioritylevel-uid: e1d6cc84-67c8-422c-b631-88403bc612ae
+< content-length: 1577
+< date: Sun, 12 Oct 2025 16:57:51 GMT
+<
+[+]ping ok
+[+]log ok
+[+]etcd ok
+[+]poststarthook/start-apiserver-admission-initializer ok
+[+]poststarthook/generic-apiserver-start-informers ok
+[+]poststarthook/priority-and-fairness-config-consumer ok
+[+]poststarthook/priority-and-fairness-filter ok
+[+]poststarthook/storage-object-count-tracker-hook ok
+[+]poststarthook/start-apiextensions-informers ok
+[+]poststarthook/start-apiextensions-controllers ok
+[+]poststarthook/crd-informer-synced ok
+[+]poststarthook/start-system-namespaces-controller ok
+[+]poststarthook/start-cluster-authentication-info-controller ok
+[+]poststarthook/start-kube-apiserver-identity-lease-controller ok
+[+]poststarthook/start-kube-apiserver-identity-lease-garbage-collector ok
+[+]poststarthook/start-legacy-token-tracking-controller ok
+[+]poststarthook/start-service-ip-repair-controllers ok
+[+]poststarthook/rbac/bootstrap-roles ok
+[+]poststarthook/scheduling/bootstrap-system-priority-classes ok
+[+]poststarthook/priority-and-fairness-config-producer ok
+[+]poststarthook/bootstrap-controller ok
+[+]poststarthook/aggregator-reload-proxy-client-cert ok
+[+]poststarthook/start-kube-aggregator-informers ok
+[+]poststarthook/apiservice-status-local-available-controller ok
+[+]poststarthook/apiservice-status-remote-available-controller ok
+[+]poststarthook/apiservice-registration-controller ok
+[+]poststarthook/apiservice-discovery-controller ok
+[+]poststarthook/kube-apiserver-autoregistration ok
+[+]autoregister-completion ok
+[+]poststarthook/apiservice-openapi-controller ok
+[+]poststarthook/apiservice-openapiv3-controller ok
+livez check passed
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+
+>>> curl -vk "https://62.118.136.124:10443/readyz"
+*   Trying 62.118.136.124:10443...
+* Connected to 62.118.136.124 (62.118.136.124) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://62.118.136.124:10443/readyz
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 62.118.136.124:10443]
+* [HTTP/2] [1] [:path: /readyz]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /readyz HTTP/2
+> Host: 62.118.136.124:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 200
+< audit-id: de781355-f145-4b30-b704-e6b28e8550f3
+< cache-control: no-cache, private
+< content-type: text/plain; charset=utf-8
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 3d7763aa-009b-44be-ad52-4b755c8e3a96
+< x-kubernetes-pf-prioritylevel-uid: e1d6cc84-67c8-422c-b631-88403bc612ae
+< content-length: 2
+< date: Sun, 12 Oct 2025 16:57:52 GMT
+<
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+ok
+>>> curl -vk "https://62.118.136.124:10443/version"
+*   Trying 62.118.136.124:10443...
+* Connected to 62.118.136.124 (62.118.136.124) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://62.118.136.124:10443/version
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 62.118.136.124:10443]
+* [HTTP/2] [1] [:path: /version]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /version HTTP/2
+> Host: 62.118.136.124:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 200
+< audit-id: b56e7cac-6064-4a74-9e64-ddea12a2ad71
+< cache-control: no-cache, private
+< content-type: application/json
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 263
+< date: Sun, 12 Oct 2025 16:57:52 GMT
+<
+{
+  "major": "1",
+  "minor": "32",
+  "gitVersion": "v1.32.1",
+  "gitCommit": "e9c9be4007d1664e68796af02b8978640d2c1b26",
+  "gitTreeState": "clean",
+  "buildDate": "2025-01-15T14:31:55Z",
+  "goVersion": "go1.23.4",
+  "compiler": "gc",
+  "platform": "linux/amd64"
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://62.118.136.124:10443/.well-known/openid-configuration"
+*   Trying 62.118.136.124:10443...
+* Connected to 62.118.136.124 (62.118.136.124) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://62.118.136.124:10443/.well-known/openid-configuration
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 62.118.136.124:10443]
+* [HTTP/2] [1] [:path: /.well-known/openid-configuration]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /.well-known/openid-configuration HTTP/2
+> Host: 62.118.136.124:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: cf082d25-68d9-4bfa-9753-c90599975338
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 249
+< date: Sun, 12 Oct 2025 16:57:53 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/.well-known/openid-configuration\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://62.118.136.124:10443/openid/v1/jwks"
+*   Trying 62.118.136.124:10443...
+* Connected to 62.118.136.124 (62.118.136.124) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://62.118.136.124:10443/openid/v1/jwks
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 62.118.136.124:10443]
+* [HTTP/2] [1] [:path: /openid/v1/jwks]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /openid/v1/jwks HTTP/2
+> Host: 62.118.136.124:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: 944e6207-6302-4023-a78f-6686535a41b6
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 231
+< date: Sun, 12 Oct 2025 16:57:53 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/openid/v1/jwks\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://62.118.136.124:10443/metrics"
+*   Trying 62.118.136.124:10443...
+* Connected to 62.118.136.124 (62.118.136.124) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://62.118.136.124:10443/metrics
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 62.118.136.124:10443]
+* [HTTP/2] [1] [:path: /metrics]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /metrics HTTP/2
+> Host: 62.118.136.124:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: d5a82d0e-df61-4cc8-8b73-3a323ccf43f1
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 224
+< date: Sun, 12 Oct 2025 16:57:53 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/metrics\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> echo '### Testing API endpoint 193.164.155.89:10443'
+### Testing API endpoint 193.164.155.89:10443
+
+>>> openssl s_client -connect 193.164.155.89:10443 -servername kubernetes -showcerts </dev/null
+CONNECTED(00000003)
+depth=0 CN = kube-apiserver
+verify error:num=20:unable to get local issuer certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify error:num=21:unable to verify the first certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify return:1
+---
+Certificate chain
+ 0 s:CN = kube-apiserver
+   i:CN = kubernetes
+   a:PKEY: rsaEncryption, 2048 (bit); sigalg: RSA-SHA256
+   v:NotBefore: Oct 12 14:50:41 2025 GMT; NotAfter: Oct 12 14:55:41 2026 GMT
+-----BEGIN CERTIFICATE-----
+MIIDkzCCAnugAwIBAgIHEXxrUQH5pzANBgkqhkiG9w0BAQsFADAVMRMwEQYDVQQD
+EwprdWJlcm5ldGVzMB4XDTI1MTAxMjE0NTA0MVoXDTI2MTAxMjE0NTU0MVowGTEX
+MBUGA1UEAxMOa3ViZS1hcGlzZXJ2ZXIwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAw
+ggEKAoIBAQDIuWXpPtl/2l+SJhs0cFbzyB9NZHWQvFLBEO9BJ8dcVbmKYi53cVcd
+XoQZaYx40H+Cy9pK5v6RZbJyJgEi9ZQJ3ijvJ0+WHFBrCDhysWqpQKx+lBv7vtc8
+GYC8HTkaZ+5/wQZzayijFeD+s9zVP6jek+waJY8Q0tRQU7OR8ofpfjbif6SU0cb6
+I6jWXZ5Q1aoTks/ZMPXJ71lwrjVIxb/S38Et6C5DqAp1Sl5m4PzHELiwicF+zbej
+5Kvh53LV35rzGlcjl7FBmPcmTlgVylSF7oK6/x9IxgFcrF04lZffIe2HtsW8KqUP
+CtVVsxrqXyc76bDL4m6ByBMb/HeR/68bAgMBAAGjgeMwgeAwDgYDVR0PAQH/BAQD
+AgWgMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgw
+FoAUblUr8WJoaZ1yE373mWdPQfEeX4AwgYkGA1UdEQSBgTB/ggdrOHMtaGRkggpr
+dWJlcm5ldGVzghJrdWJlcm5ldGVzLmRlZmF1bHSCFmt1YmVybmV0ZXMuZGVmYXVs
+dC5zdmOCJGt1YmVybmV0ZXMuZGVmYXVsdC5zdmMuY2x1c3Rlci5sb2NhbIcECmAA
+AYcECgBGyIcEPnaIfIcEwaSbWTANBgkqhkiG9w0BAQsFAAOCAQEAf9NyKBVENLao
+vNoJJelzl25bJZqNBKPI3AAFXh12rAF+LudXH5M8ZUd8vZZMXziA5Ocj+R69GEis
+nK7W2vbjQuBWftu0ok1IJ9tnWcZYL3YhX9R7QQvD1rlo4x7YOPkqOf1iljmaVRzF
+C02zb3BJGN6N+fB1igwd1LNbpGY+Ij8K8m5PbQ8UvZwO501Yz4ikToeT98GEQIJ1
+yzXb3qCzYuadXL1WCLPlo65EyIdMOLcwSaL1q+U9OybESmprlgbKxDy76VDmmYKB
+B0uaCAG60oTlV3L2hTBxsMWa0uF9GfKrs3e2CGwf1qZQYEO0MsvABYupTzCC7vli
+c4e8HCPACg==
+-----END CERTIFICATE-----
+---
+Server certificate
+subject=CN = kube-apiserver
+issuer=CN = kubernetes
+---
+Acceptable client certificate CA names
+CN = kubernetes
+CN = front-proxy-ca
+Requested Signature Algorithms: RSA-PSS+SHA256:ECDSA+SHA256:Ed25519:RSA-PSS+SHA384:RSA-PSS+SHA512:RSA+SHA256:RSA+SHA384:RSA+SHA512:ECDSA+SHA384:ECDSA+SHA512:RSA+SHA1:ECDSA+SHA1
+Shared Requested Signature Algorithms: RSA-PSS+SHA256:ECDSA+SHA256:Ed25519:RSA-PSS+SHA384:RSA-PSS+SHA512:RSA+SHA256:RSA+SHA384:RSA+SHA512:ECDSA+SHA384:ECDSA+SHA512
+Peer signing digest: SHA256
+Peer signature type: RSA-PSS
+Server Temp Key: X25519, 253 bits
+---
+SSL handshake has read 1586 bytes and written 406 bytes
+Verification error: unable to verify the first certificate
+---
+New, TLSv1.3, Cipher is TLS_AES_128_GCM_SHA256
+Server public key is 2048 bit
+Secure Renegotiation IS NOT supported
+Compression: NONE
+Expansion: NONE
+No ALPN negotiated
+Early data was not sent
+Verify return code: 21 (unable to verify the first certificate)
+---
+DONE
+
+>>> openssl s_client -connect 193.164.155.89:10443 -servername kubernetes -showcerts </dev/null | openssl x509 -noout -issuer -subject -ext subjectAltName
+depth=0 CN = kube-apiserver
+verify error:num=20:unable to get local issuer certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify error:num=21:unable to verify the first certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify return:1
+DONE
+issuer=CN = kubernetes
+subject=CN = kube-apiserver
+X509v3 Subject Alternative Name:
+    DNS:k8s-hdd, DNS:kubernetes, DNS:kubernetes.default, DNS:kubernetes.default.svc, DNS:kubernetes.default.svc.cluster.local, IP Address:10.96.0.1, IP Address:10.0.70.200, IP Address:62.118.136.124, IP Address:193.164.155.89
+
+>>> openssl s_client -connect 193.164.155.89:10443 -showcerts </dev/null | openssl x509 -noout -text
+Can't use SSL_get_servername
+depth=0 CN = kube-apiserver
+verify error:num=20:unable to get local issuer certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify error:num=21:unable to verify the first certificate
+verify return:1
+depth=0 CN = kube-apiserver
+verify return:1
+DONE
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 4921874966509991 (0x117c6b5101f9a7)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: CN = kubernetes
+        Validity
+            Not Before: Oct 12 14:50:41 2025 GMT
+            Not After : Oct 12 14:55:41 2026 GMT
+        Subject: CN = kube-apiserver
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                Modulus:
+                    00:c8:b9:65:e9:3e:d9:7f:da:5f:92:26:1b:34:70:
+                    56:f3:c8:1f:4d:64:75:90:bc:52:c1:10:ef:41:27:
+                    c7:5c:55:b9:8a:62:2e:77:71:57:1d:5e:84:19:69:
+                    8c:78:d0:7f:82:cb:da:4a:e6:fe:91:65:b2:72:26:
+                    01:22:f5:94:09:de:28:ef:27:4f:96:1c:50:6b:08:
+                    38:72:b1:6a:a9:40:ac:7e:94:1b:fb:be:d7:3c:19:
+                    80:bc:1d:39:1a:67:ee:7f:c1:06:73:6b:28:a3:15:
+                    e0:fe:b3:dc:d5:3f:a8:de:93:ec:1a:25:8f:10:d2:
+                    d4:50:53:b3:91:f2:87:e9:7e:36:e2:7f:a4:94:d1:
+                    c6:fa:23:a8:d6:5d:9e:50:d5:aa:13:92:cf:d9:30:
+                    f5:c9:ef:59:70:ae:35:48:c5:bf:d2:df:c1:2d:e8:
+                    2e:43:a8:0a:75:4a:5e:66:e0:fc:c7:10:b8:b0:89:
+                    c1:7e:cd:b7:a3:e4:ab:e1:e7:72:d5:df:9a:f3:1a:
+                    57:23:97:b1:41:98:f7:26:4e:58:15:ca:54:85:ee:
+                    82:ba:ff:1f:48:c6:01:5c:ac:5d:38:95:97:df:21:
+                    ed:87:b6:c5:bc:2a:a5:0f:0a:d5:55:b3:1a:ea:5f:
+                    27:3b:e9:b0:cb:e2:6e:81:c8:13:1b:fc:77:91:ff:
+                    af:1b
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Key Usage: critical
+                Digital Signature, Key Encipherment
+            X509v3 Extended Key Usage:
+                TLS Web Server Authentication
+            X509v3 Basic Constraints: critical
+                CA:FALSE
+            X509v3 Authority Key Identifier:
+                6E:55:2B:F1:62:68:69:9D:72:13:7E:F7:99:67:4F:41:F1:1E:5F:80
+            X509v3 Subject Alternative Name:
+                DNS:k8s-hdd, DNS:kubernetes, DNS:kubernetes.default, DNS:kubernetes.default.svc, DNS:kubernetes.default.svc.cluster.local, IP Address:10.96.0.1, IP Address:10.0.70.200, IP Address:62.118.136.124, IP Address:193.164.155.89
+    Signature Algorithm: sha256WithRSAEncryption
+    Signature Value:
+        7f:d3:72:28:15:44:34:b6:a8:bc:da:09:25:e9:73:97:6e:5b:
+        25:9a:8d:04:a3:c8:dc:00:05:5e:1d:76:ac:01:7e:2e:e7:57:
+        1f:93:3c:65:47:7c:bd:96:4c:5f:38:80:e4:e7:23:f9:1e:bd:
+        18:48:ac:9c:ae:d6:da:f6:e3:42:e0:56:7e:db:b4:a2:4d:48:
+        27:db:67:59:c6:58:2f:76:21:5f:d4:7b:41:0b:c3:d6:b9:68:
+        e3:1e:d8:38:f9:2a:39:fd:62:96:39:9a:55:1c:c5:0b:4d:b3:
+        6f:70:49:18:de:8d:f9:f0:75:8a:0c:1d:d4:b3:5b:a4:66:3e:
+        22:3f:0a:f2:6e:4f:6d:0f:14:bd:9c:0e:e7:4d:58:cf:88:a4:
+        4e:87:93:f7:c1:84:40:82:75:cb:35:db:de:a0:b3:62:e6:9d:
+        5c:bd:56:08:b3:e5:a3:ae:44:c8:87:4c:38:b7:30:49:a2:f5:
+        ab:e5:3d:3b:26:c4:4a:6a:6b:96:06:ca:c4:3c:bb:e9:50:e6:
+        99:82:81:07:4b:9a:08:01:ba:d2:84:e5:57:72:f6:85:30:71:
+        b0:c5:9a:d2:e1:7d:19:f2:ab:b3:77:b6:08:6c:1f:d6:a6:50:
+        60:43:b4:32:cb:c0:05:8b:a9:4f:30:82:ee:f9:62:73:87:bc:
+        1c:23:c0:0a
+
+>>> curl -vk "https://193.164.155.89:10443/"
+*   Trying 193.164.155.89:10443...
+* Connected to 193.164.155.89 (193.164.155.89) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://193.164.155.89:10443/
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 193.164.155.89:10443]
+* [HTTP/2] [1] [:path: /]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET / HTTP/2
+> Host: 193.164.155.89:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: faa91905-e97e-42a1-964a-e3251fa53ace
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 217
+< date: Sun, 12 Oct 2025 16:57:55 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://193.164.155.89:10443/api"
+*   Trying 193.164.155.89:10443...
+* Connected to 193.164.155.89 (193.164.155.89) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://193.164.155.89:10443/api
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 193.164.155.89:10443]
+* [HTTP/2] [1] [:path: /api]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /api HTTP/2
+> Host: 193.164.155.89:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: eee47d3a-1b11-4b0f-b767-5a6459a65a9e
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 220
+< date: Sun, 12 Oct 2025 16:57:56 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/api\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://193.164.155.89:10443/healthz"
+*   Trying 193.164.155.89:10443...
+* Connected to 193.164.155.89 (193.164.155.89) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://193.164.155.89:10443/healthz
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 193.164.155.89:10443]
+* [HTTP/2] [1] [:path: /healthz]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /healthz HTTP/2
+> Host: 193.164.155.89:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 200
+< audit-id: be1079bf-67dc-4328-9220-16aae953bbda
+< cache-control: no-cache, private
+< content-type: text/plain; charset=utf-8
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 3d7763aa-009b-44be-ad52-4b755c8e3a96
+< x-kubernetes-pf-prioritylevel-uid: e1d6cc84-67c8-422c-b631-88403bc612ae
+< content-length: 2
+< date: Sun, 12 Oct 2025 16:57:56 GMT
+<
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+ok
+>>> curl -vk "https://193.164.155.89:10443/livez?verbose"
+*   Trying 193.164.155.89:10443...
+* Connected to 193.164.155.89 (193.164.155.89) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://193.164.155.89:10443/livez?verbose
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 193.164.155.89:10443]
+* [HTTP/2] [1] [:path: /livez?verbose]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /livez?verbose HTTP/2
+> Host: 193.164.155.89:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 200
+< audit-id: 64df92ab-438a-4d5d-bec1-ec475a6606b4
+< cache-control: no-cache, private
+< content-type: text/plain; charset=utf-8
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 3d7763aa-009b-44be-ad52-4b755c8e3a96
+< x-kubernetes-pf-prioritylevel-uid: e1d6cc84-67c8-422c-b631-88403bc612ae
+< content-length: 1577
+< date: Sun, 12 Oct 2025 16:57:57 GMT
+<
+[+]ping ok
+[+]log ok
+[+]etcd ok
+[+]poststarthook/start-apiserver-admission-initializer ok
+[+]poststarthook/generic-apiserver-start-informers ok
+[+]poststarthook/priority-and-fairness-config-consumer ok
+[+]poststarthook/priority-and-fairness-filter ok
+[+]poststarthook/storage-object-count-tracker-hook ok
+[+]poststarthook/start-apiextensions-informers ok
+[+]poststarthook/start-apiextensions-controllers ok
+[+]poststarthook/crd-informer-synced ok
+[+]poststarthook/start-system-namespaces-controller ok
+[+]poststarthook/start-cluster-authentication-info-controller ok
+[+]poststarthook/start-kube-apiserver-identity-lease-controller ok
+[+]poststarthook/start-kube-apiserver-identity-lease-garbage-collector ok
+[+]poststarthook/start-legacy-token-tracking-controller ok
+[+]poststarthook/start-service-ip-repair-controllers ok
+[+]poststarthook/rbac/bootstrap-roles ok
+[+]poststarthook/scheduling/bootstrap-system-priority-classes ok
+[+]poststarthook/priority-and-fairness-config-producer ok
+[+]poststarthook/bootstrap-controller ok
+[+]poststarthook/aggregator-reload-proxy-client-cert ok
+[+]poststarthook/start-kube-aggregator-informers ok
+[+]poststarthook/apiservice-status-local-available-controller ok
+[+]poststarthook/apiservice-status-remote-available-controller ok
+[+]poststarthook/apiservice-registration-controller ok
+[+]poststarthook/apiservice-discovery-controller ok
+[+]poststarthook/kube-apiserver-autoregistration ok
+[+]autoregister-completion ok
+[+]poststarthook/apiservice-openapi-controller ok
+[+]poststarthook/apiservice-openapiv3-controller ok
+livez check passed
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+
+>>> curl -vk "https://193.164.155.89:10443/readyz"
+*   Trying 193.164.155.89:10443...
+* Connected to 193.164.155.89 (193.164.155.89) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://193.164.155.89:10443/readyz
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 193.164.155.89:10443]
+* [HTTP/2] [1] [:path: /readyz]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /readyz HTTP/2
+> Host: 193.164.155.89:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 200
+< audit-id: b4ba5934-a56e-408f-9584-bdd63ebd5685
+< cache-control: no-cache, private
+< content-type: text/plain; charset=utf-8
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 3d7763aa-009b-44be-ad52-4b755c8e3a96
+< x-kubernetes-pf-prioritylevel-uid: e1d6cc84-67c8-422c-b631-88403bc612ae
+< content-length: 2
+< date: Sun, 12 Oct 2025 16:57:57 GMT
+<
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+ok
+>>> curl -vk "https://193.164.155.89:10443/version"
+*   Trying 193.164.155.89:10443...
+* Connected to 193.164.155.89 (193.164.155.89) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://193.164.155.89:10443/version
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 193.164.155.89:10443]
+* [HTTP/2] [1] [:path: /version]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /version HTTP/2
+> Host: 193.164.155.89:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 200
+< audit-id: 771e107c-36f8-4762-a0a7-9692b14bf7e3
+< cache-control: no-cache, private
+< content-type: application/json
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 263
+< date: Sun, 12 Oct 2025 16:57:58 GMT
+<
+{
+  "major": "1",
+  "minor": "32",
+  "gitVersion": "v1.32.1",
+  "gitCommit": "e9c9be4007d1664e68796af02b8978640d2c1b26",
+  "gitTreeState": "clean",
+  "buildDate": "2025-01-15T14:31:55Z",
+  "goVersion": "go1.23.4",
+  "compiler": "gc",
+  "platform": "linux/amd64"
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://193.164.155.89:10443/.well-known/openid-configuration"
+*   Trying 193.164.155.89:10443...
+* Connected to 193.164.155.89 (193.164.155.89) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://193.164.155.89:10443/.well-known/openid-configuration
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 193.164.155.89:10443]
+* [HTTP/2] [1] [:path: /.well-known/openid-configuration]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /.well-known/openid-configuration HTTP/2
+> Host: 193.164.155.89:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: 492fb2aa-ba74-4107-89b6-728f52db217c
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 249
+< date: Sun, 12 Oct 2025 16:58:00 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/.well-known/openid-configuration\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://193.164.155.89:10443/openid/v1/jwks"
+*   Trying 193.164.155.89:10443...
+* Connected to 193.164.155.89 (193.164.155.89) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://193.164.155.89:10443/openid/v1/jwks
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 193.164.155.89:10443]
+* [HTTP/2] [1] [:path: /openid/v1/jwks]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /openid/v1/jwks HTTP/2
+> Host: 193.164.155.89:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: ba6222c8-8f43-436c-bada-2889e72784df
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 231
+< date: Sun, 12 Oct 2025 16:58:00 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/openid/v1/jwks\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+>>> curl -vk "https://193.164.155.89:10443/metrics"
+*   Trying 193.164.155.89:10443...
+* Connected to 193.164.155.89 (193.164.155.89) port 10443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Request CERT (13):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Certificate (11):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: CN=kube-apiserver
+*  start date: Oct 12 14:50:41 2025 GMT
+*  expire date: Oct 12 14:55:41 2026 GMT
+*  issuer: CN=kubernetes
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://193.164.155.89:10443/metrics
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 193.164.155.89:10443]
+* [HTTP/2] [1] [:path: /metrics]
+* [HTTP/2] [1] [user-agent: curl/8.5.0]
+* [HTTP/2] [1] [accept: */*]
+> GET /metrics HTTP/2
+> Host: 193.164.155.89:10443
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+* received GOAWAY, error=0, last_stream=1
+< HTTP/2 403
+< audit-id: d0e28aaa-71af-44bd-8632-4b02fa2c9801
+< cache-control: no-cache, private
+< content-type: application/json
+< x-content-type-options: nosniff
+< x-kubernetes-pf-flowschema-uid: 321c8e29-9d04-46bc-ab0c-4a08045d4b2b
+< x-kubernetes-pf-prioritylevel-uid: 269ad8d6-1d50-48f8-8b28-812638fef6aa
+< content-length: 224
+< date: Sun, 12 Oct 2025 16:58:01 GMT
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "forbidden: User \"system:anonymous\" cannot get path \"/metrics\"",
+  "reason": "Forbidden",
+  "details": {},
+  "code": 403
+* Closing connection
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+}
+### Remote diagnostics complete
+root@main-vpn-fr:~# Connection to 94.183.187.28 closed by remote host.
+Connection to 94.183.187.28 closed.
