@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""Utility for managing codex SSH bastion inventory."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import fcntl
+import json
+import os
+import pathlib
+import sys
+from typing import Any, Dict, Iterable, List
+
+DATA_DIR = pathlib.Path(os.environ.get("DATA_DIR", "/var/lib/codex-ssh"))
+INVENTORY_FILE = DATA_DIR / "inventory.json"
+LABELS_FILE = DATA_DIR / "labels.json"
+LOCK_FILE = DATA_DIR / ".inventory.lock"
+
+
+def _load_json(path: pathlib.Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        with path.open("r", encoding="utf-8") as fp:
+            return json.load(fp)
+    except json.JSONDecodeError:
+        return default
+
+
+def _write_json(path: pathlib.Path, value: Any) -> None:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as fp:
+        json.dump(value, fp, indent=2, sort_keys=True)
+        fp.write("\n")
+    os.chmod(tmp_path, 0o600)
+    os.replace(tmp_path, path)
+
+
+class InventoryStore:
+    def __init__(self) -> None:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self._lock_file = LOCK_FILE.open("a+")
+        fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX)
+        self.inventory: List[Dict[str, Any]] = list(_load_json(INVENTORY_FILE, []))
+        self.labels: Dict[str, str] = dict(_load_json(LABELS_FILE, {}))
+
+    def save(self) -> None:
+        _write_json(INVENTORY_FILE, self.inventory)
+        _write_json(LABELS_FILE, self.labels)
+
+    def close(self) -> None:
+        try:
+            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._lock_file.close()
+
+    def __enter__(self) -> "InventoryStore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+
+def _normalize_id(target: str, port: int) -> str:
+    safe_target = target.replace("/", "_")
+    return f"{safe_target}:{port}"
+
+
+def _find_record(store: InventoryStore, record_id: str) -> Dict[str, Any] | None:
+    for item in store.inventory:
+        if item.get("id") == record_id:
+            return item
+    return None
+
+
+def cmd_record(args: argparse.Namespace) -> int:
+    with InventoryStore() as store:
+        record_id = args.id or _normalize_id(args.target, args.port)
+        now = _dt.datetime.utcnow().replace(tzinfo=_dt.timezone.utc).isoformat()
+        entry = _find_record(store, record_id)
+        payload = {
+            "id": record_id,
+            "target": args.target,
+            "port": args.port,
+            "jump_chain": args.jump_chain,
+            "fingerprint": args.fingerprint or "",
+            "last_seen": now,
+        }
+        if entry is None:
+            store.inventory.append(payload)
+        else:
+            entry.update(payload)
+        store.save()
+    return 0
+
+
+def _iter_sorted(store: InventoryStore) -> Iterable[Dict[str, Any]]:
+    return sorted(store.inventory, key=lambda item: item.get("id", ""))
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    with InventoryStore() as store:
+        rows: List[List[str]] = []
+        headers = ["ID", "NAME", "TARGET", "PORT", "JUMP", "FINGERPRINT", "LAST_SEEN"]
+        for entry in _iter_sorted(store):
+            record_id = entry["id"]
+            name = store.labels.get(record_id, record_id)
+            jump_chain = " -> ".join(entry.get("jump_chain", [])) or "direct"
+            rows.append([
+                record_id,
+                name,
+                entry.get("target", ""),
+                str(entry.get("port", "")),
+                jump_chain,
+                entry.get("fingerprint", ""),
+                entry.get("last_seen", ""),
+            ])
+        widths = [len(h) for h in headers]
+        for row in rows:
+            for idx, cell in enumerate(row):
+                widths[idx] = max(widths[idx], len(cell))
+        fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+        print(fmt.format(*headers))
+        for row in rows:
+            print(fmt.format(*row))
+    return 0
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    with InventoryStore() as store:
+        payload: List[Dict[str, Any]] = []
+        for entry in _iter_sorted(store):
+            record_id = entry["id"]
+            payload.append(
+                {
+                    "id": record_id,
+                    "name": store.labels.get(record_id, record_id),
+                    "target": entry.get("target"),
+                    "port": entry.get("port"),
+                    "jump_chain": entry.get("jump_chain", []),
+                    "fingerprint": entry.get("fingerprint", ""),
+                    "last_seen": entry.get("last_seen", ""),
+                }
+            )
+        json.dump(payload, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    return 0
+
+
+def cmd_rename(args: argparse.Namespace) -> int:
+    with InventoryStore() as store:
+        record_id = args.id
+        entry = _find_record(store, record_id)
+        if entry is None:
+            print(f"Record '{record_id}' was not found", file=sys.stderr)
+            return 1
+        if args.name:
+            store.labels[record_id] = args.name
+        else:
+            store.labels.pop(record_id, None)
+        store.save()
+    return 0
+
+
+def cmd_motd(args: argparse.Namespace) -> int:
+    with InventoryStore() as store:
+        lines: List[str] = []
+        base_message = args.header or os.environ.get("CODEX_SSH_MOTD", "Codex SSH bastion")
+        lines.append(base_message)
+        if store.inventory:
+            lines.append("")
+            lines.append("Доступные цели:")
+            for entry in _iter_sorted(store):
+                record_id = entry["id"]
+                name = store.labels.get(record_id, record_id)
+                target = entry.get("target", "")
+                port = entry.get("port", 22)
+                jump_chain = " -> ".join(entry.get("jump_chain", [])) or "direct"
+                lines.append(f" • {name} ({target}:{port}) через {jump_chain}")
+        else:
+            lines.append("")
+            lines.append("Инвентарь пуст. Используйте ssh/scp/sftp, чтобы добавить записи.")
+        lines.append("")
+        lines.append("Переименовать цель: codex-hostctl rename <id> <name>")
+        lines.append("Экспорт JSON: codex-hostctl export")
+        print("\n".join(lines))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_record = sub.add_parser("record", help="Записать или обновить цель в инвентаре")
+    p_record.add_argument("--id", help="Переопределить идентификатор записи", default=None)
+    p_record.add_argument("--target", required=True)
+    p_record.add_argument("--port", type=int, default=22)
+    p_record.add_argument("--jump-chain", nargs="*", default=[])
+    p_record.add_argument("--fingerprint", default="")
+    p_record.set_defaults(func=cmd_record)
+
+    p_list = sub.add_parser("list", help="Показать таблицу инвентаря")
+    p_list.set_defaults(func=cmd_list)
+
+    p_export = sub.add_parser("export", help="Экспортировать инвентарь в JSON")
+    p_export.set_defaults(func=cmd_export)
+
+    p_rename = sub.add_parser("rename", help="Присвоить понятное имя цели")
+    p_rename.add_argument("id")
+    p_rename.add_argument("name", nargs="?", default="", help="Новое имя (пусто для удаления)")
+    p_rename.set_defaults(func=cmd_rename)
+
+    p_motd = sub.add_parser("motd", help="Сгенерировать сообщение дня")
+    p_motd.add_argument("--header", default="")
+    p_motd.set_defaults(func=cmd_motd)
+
+    return parser
+
+
+def main(argv: List[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

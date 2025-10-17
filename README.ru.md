@@ -1,185 +1,91 @@
-# Шлюз API Kubernetes через NodePort или HTTPS
+# Codex SSH Bastion
 
-*English documentation is available in [README.md](README.md).* 
+*English documentation is available in [README.md](README.md).*  
+Репозиторий поднимает SSH-бастион в кластере Kubernetes и содержит готовый контейнерный образ с учётом требований Codex.
 
-## 1. Назначение проекта
-Опубликовать API Kubernetes для рабочей среды Codex, обходя корпоративный TLS-прокси. Во внутреннем кластере запускается NGINX на NodePort, который принимает HTTP-запросы из Codex и проксирует их к настоящему API-серверу через HTTPS с проверкой по штатному кластерному CA.
+## 1. Состав
+- **Образ** – каталог [`images/ssh-bastion/`](images/ssh-bastion/) содержит Dockerfile, entrypoint, CLI `codex-hostctl` и обёртки `ssh/scp/sftp`.
+- **Манифесты** – шаблоны в [`manifests/ssh-bastion/`](manifests/ssh-bastion/) описывают Namespace, PVC, ConfigMap, Deployment и Service. Они параметризуются скриптом `deploy-ssh-bastion.sh`.
+- **Хранилище** – PVC (`/var/lib/codex-ssh`) держит инвентарь подключений и пользовательские метки, поэтому данные переживают рестарт пода.
+- **Скрипты** – [`scripts/deploy-ssh-bastion.sh`](scripts/deploy-ssh-bastion.sh) применяет манифесты и при необходимости обновляет секрет `authorized_keys`.
 
-## 2. Архитектура
-- **Шлюз** – манифесты `cm-nginx.conf.yaml` и `deploy.yaml` разворачивают обратный прокси NGINX в пространстве имён `k8s-gw`.
-- **Режимы публикации**
-  - *NodePort (по умолчанию)* – сервис типа NodePort слушает порт 80 на каждом узле.
-  - *HTTPS через ingress* – скрипт может создать ресурс Ingress и TLS-секрет, чтобы отдавать шлюз через контроллер ingress.
-- **Режимы аутентификации**
-  - `AUTH_MODE=passthrough` (режим по умолчанию) – токен не подставляется, каждый клиент обязан передавать свой bearer-токен (например, через секрет Codex `K8S_TOKEN`). Это рекомендуемый вариант.
-  - `AUTH_MODE=inject` – шлюз подставляет сервисный токен `codex-gw-token`. Любой клиент, имеющий доступ к NodePort, получает права cluster-admin. Перед запуском установите `ALLOW_INJECT=1`, подтверждая осознанный выбор.
-- **Подготовка Codex** – скрипт `setup-codex-workspace.sh` устанавливает `kubectl` и создаёт kubeconfig, направленный на NodePort.
+## 2. Поведение контейнера
+Entry-point выполняет:
+1. Создание системного пользователя `codex`, подготовку директории `/var/lib/codex-ssh` с правами `0700` и файлов `inventory.json`, `labels.json`.
+2. Копирование ключей из примонтированного секрета в `~codex/.ssh/authorized_keys` (права `600`).
+3. Перенос оригинальных `ssh`, `scp`, `sftp` в `/opt/codex-ssh/originals/` и замена их обёртками, которые перед запуском клиента записывают параметры подключения в инвентарь.
+4. Подключение сниппета `sshd_config` из ConfigMap, генерацию host-ключей и обновление MOTD на основе `codex-hostctl motd`.
+5. Запуск OpenSSH (`/usr/sbin/sshd -D -e`). В конфигурации выключены парольная аутентификация, root-доступ и X11; разрешён только пользователь `codex`.
 
-## 3. Предварительные требования на хосте администратора
-- `kubectl` с правами администратора на целевом кластере.
-- Доступ из Codex хотя бы к одному узлу кластера на выбранном NodePort (диапазон `30000-32767`).
-- (Необязательно) заранее задайте переменные окружения, чтобы изменить поведение `deploy-nodeport-gateway.sh`. Все доступные
-  параметры описаны ниже.
+### 2.1 CLI `codex-hostctl`
+- `codex-hostctl record` – служебная команда, вызывается обёртками для фиксации подключения.
+- `codex-hostctl list` – табличный список (id, имя, цель, порт, цепочка jump, fingerprint, `last_seen`).
+- `codex-hostctl export` – JSON для синхронизации с рабочим пространством.
+- `codex-hostctl rename <id> <name>` – присвоение читаемого имени (пустое значение удаляет метку).
+- `codex-hostctl motd` – текст для `/etc/motd` (используется entrypoint’ом).
 
-### 3.1 Переменные `deploy-nodeport-gateway.sh`
-| Переменная | Значение по умолчанию | Назначение |
+## 3. Развёртывание
+```bash
+SSH_NAMESPACE=codex-ssh \
+SSH_SERVICE_NODE_PORT=32222 \
+SSH_IMAGE_REGISTRY=ghcr.io/gordeytsy \
+SSH_BASTION_IMAGE=codex-ssh-bastion:latest \
+SSH_AUTHORIZED_SECRET=ssh-authorized-keys \
+SSH_AUTHORIZED_KEYS_FILE=./authorized_keys \
+scripts/deploy-ssh-bastion.sh
+```
+
+Скрипт создаёт временные файлы, прогоняет их через `envsubst` и применяет `kubectl apply`. При наличии `SSH_AUTHORIZED_KEYS_FILE` секрет перегенерируется автоматически. После выполнения вы увидите подсказки по проверке rollout, сервису, тестовому `ssh` и обновлению секрета.
+
+### 3.1 Переменные окружения
+| Переменная | Значение по умолчанию | Описание |
 | --- | --- | --- |
-| `NAMESPACE` | `k8s-gw` | Пространство имён, в котором создаются все объекты шлюза.
-| `SECRET_NAME` | `cluster-ca` | Имя секрета с корневым сертификатом кластера (`ca.crt`).
-| `DEPLOYMENT_NAME` | `k8s-api-gw` | Имя Deployment с NGINX; используется командами rollout.
-| `SERVICE_NAME` | `k8s-api-gw` | Имя сервиса, публикующего Deployment.
-| `EXPOSE_MODE` | `nodeport` | `nodeport` оставляет сервис в режиме NodePort. Значение `https` добавляет Ingress и настраивает HTTPS на уровне кластера.
-| `SERVICE_TYPE` | `NodePort` (или `ClusterIP` при `EXPOSE_MODE=https`) | Тип Kubernetes-сервиса. При необходимости задайте `LoadBalancer` или другое значение.
-| `SERVICE_NODE_PORT` | — | Необязательный фиксированный NodePort (30000-32767). Полезно для предварительного открытия фаерволов и детерминированной автоматизации; скрипт проверяет диапазон и без значения оставляет автоназначение. Допускается псевдоним `GW_NODE_PORT` для обратной совместимости.
-| `INGRESS_NAME` | `${SERVICE_NAME}` | Имя Ingress при `EXPOSE_MODE=https`. Для NodePort-режима игнорируется.
-| `INGRESS_HOST` / `INGRESS_HOSTS` | — | Хост (или список через запятую), который должен обрабатываться ingress'ом. Переменная `INGRESS_HOSTS` имеет приоритет. Оставьте пустой, чтобы принимать все хосты.
-| `INGRESS_CLASS_NAME` | — | Имя класса ingress (например, `nginx`). Без значения используется класс по умолчанию.
-| `INGRESS_PROXY_BODY_SIZE` | `64m` | Значение аннотации `nginx.ingress.kubernetes.io/proxy-body-size`.
-| `INGRESS_EXTRA_ANNOTATIONS` | — | Дополнительные аннотации ingress. Указывайте по одной строке `ключ: значение` — скрипт добавит нужные отступы.
-| `UPSTREAM_API` | `10.0.70.200:6443` | Внутренний адрес и порт реального API сервера Kubernetes.
-| `SA_NAME` | `codex-gw` | Сервисный аккаунт, привязанный к cluster-admin и используемый подом.
-| `TOKEN_SECRET_NAME` | `${SA_NAME}-token` | Секрет типа `kubernetes.io/service-account-token`, из которого NGINX читает токен.
-| `CLUSTERROLEBINDING_NAME` | `${SA_NAME}-admin` | ClusterRoleBinding, выдающий права cluster-admin сервисному аккаунту.
-| `CONTEXT_NAME` | Текущий контекст kubeconfig | Определяет, из какого контекста брать данные о кластере.
-| `AUTH_MODE` | `passthrough` | `passthrough` требует заголовок `Authorization` от клиента; `inject` подставляет SA-токен всем клиентам.
-| `ALLOW_INJECT` | `0` | Должна быть равна `1` при использовании `AUTH_MODE=inject`, чтобы явно подтвердить небезопасный режим.
-| `TLS_SECRET_NAME` | `${SERVICE_NAME}-tls` | TLS-секрет, к которому привязывается ingress. Создаётся/обновляется при наличии сертификата.
-| `TLS_CERT_FILE` / `TLS_KEY_FILE` | — | Пути к файлам сертификата и ключа, загружаемым в `TLS_SECRET_NAME`.
-| `TLS_CERT` / `TLS_KEY` | — | Содержимое сертификата и ключа в формате PEM, если удобнее передавать их напрямую (`TLS_CERT_DATA` / `TLS_KEY_DATA` тоже поддерживаются).
-| `TLS_GENERATE_SELF_SIGNED` | `0` | Значение `1` заставляет скрипт выпустить самоподписанный сертификат.
-| `TLS_COMMON_NAME` | `k8s-api-gw.local` | Common Name, используемый при генерации самоподписанного сертификата (и добавляемый в SAN по умолчанию).
-| `TLS_SANS` | — | Дополнительные SAN при генерации сертификата. Список через запятую, например `DNS:gw.example.com,IP:192.168.10.10`.
-| `TLS_SELF_SIGNED_DAYS` | `365` | Срок действия самоподписанного сертификата (в днях).
-| `CLUSTER_CA_B64` | автоопределяется | CA в base64. Укажите вручную, если kubeconfig не содержит `certificate-authority-data`.
+| `SSH_NAMESPACE` | `codex-ssh` | Namespace для всех объектов. |
+| `SSH_DEPLOYMENT_NAME` | `ssh-bastion` | Имя Deployment. |
+| `SSH_SERVICE_NAME` | `ssh-bastion` | Имя Service. |
+| `SSH_SERVICE_TYPE` | `NodePort` | Тип сервиса (`NodePort`, `LoadBalancer`, `ClusterIP`). |
+| `SSH_SERVICE_NODE_PORT` | `32222` | Фиксированный NodePort; используется только при `SSH_SERVICE_TYPE=NodePort`. |
+| `SSH_PVC_NAME` | `codex-ssh-data` | Имя PersistentVolumeClaim. |
+| `SSH_PVC_SIZE` | `1Gi` | Запрашиваемый объём диска. |
+| `SSH_STORAGE_CLASS` | — | StorageClass. Оставьте пустым для значения по умолчанию. |
+| `SSH_CONFIGMAP_NAME` | `ssh-bastion-config` | Имя ConfigMap с MOTD и `sshd_config`. |
+| `SSH_AUTHORIZED_SECRET` | `ssh-authorized-keys` | Секрет с публичными ключами. |
+| `SSH_BASTION_IMAGE` | `codex-ssh-bastion:latest` | Имя и тег образа без префикса реестра. |
+| `SSH_IMAGE_REGISTRY` | — | Префикс реестра (`registry.example.com/team`). |
+| `SSH_MOTD_CONTENT` | `Codex SSH bastion
+Используйте codex-hostctl list, чтобы увидеть найденные цели.` | Базовое сообщение MOTD. |
+| `SSH_AUTHORIZED_KEYS_FILE` | — | Путь до `authorized_keys`; при указании секрет обновится автоматически. |
 
-Скрипт старается получить значения из kubeconfig автоматически. Переопределяйте их, если нужно использовать другие имена, уже
-существующие сервисные аккаунты или проксировать запросы на нестандартную конечную точку API.
-
-## 4. Развёртывание шлюза (хост администратора)
-```bash
-cd /path/to/k8s-expose-apiserver
-./scripts/deploy-nodeport-gateway.sh
-```
-По умолчанию сервис остаётся NodePort, а клиенты должны передавать собственный bearer-токен (`AUTH_MODE=passthrough`). Изменяйте параметры только по необходимости:
-```bash
-ALLOW_INJECT=1 AUTH_MODE=inject ./scripts/deploy-nodeport-gateway.sh
-```
-Скрипт выполняет:
-1. Создание/обновление namespace, сервисного аккаунта, RBAC, секрета с CA и токена.
-2. При необходимости — создание или обновление TLS-секрета (если переданы файлы либо включена генерация самоподписанного сертификата).
-3. Шаблонизацию и применение ConfigMap, Deployment и Service (а также Ingress при `EXPOSE_MODE=https`).
-4. Перезапуск шлюза, ожидание успешного развёртывания и вывод подсказок по подключению в выбранном режиме.
-
-### NodePort (по умолчанию)
-Если достаточно открытого HTTP-соединения между Codex и кластером, оставляйте режим NodePort — скрипт покажет список внутренних IP узлов и назначенный порт:
-```bash
-./scripts/deploy-nodeport-gateway.sh
-```
-При необходимости можно зафиксировать порт или поменять тип сервиса:
-```bash
-SERVICE_NODE_PORT=30443 ./scripts/deploy-nodeport-gateway.sh
-SERVICE_TYPE=LoadBalancer ./scripts/deploy-nodeport-gateway.sh
-```
-
-### HTTPS через ingress контроллер
-Для публикации шлюза через ingress установите `EXPOSE_MODE=https`. Можно либо использовать готовую пару сертификат/ключ, либо поручить скрипту сгенерировать самоподписанный сертификат.
-
-**Пример: внешний домен и готовый сертификат**
-```bash
-EXPOSE_MODE=https \
-INGRESS_HOST=gateway.example.com \
-TLS_CERT_FILE=/path/to/fullchain.pem \
-TLS_KEY_FILE=/path/to/privkey.pem \
-./scripts/deploy-nodeport-gateway.sh
-```
-Дополнительно доступны `INGRESS_HOSTS` (несколько хостов через запятую), `INGRESS_CLASS_NAME` для выбора ingress-контроллера и `INGRESS_EXTRA_ANNOTATIONS` для своих аннотаций.
-
-**Пример: самоподписанный сертификат без публичного DNS**
-```bash
-EXPOSE_MODE=https \
-TLS_GENERATE_SELF_SIGNED=1 \
-TLS_COMMON_NAME=k8s-api.local \
-TLS_SANS=DNS:k8s-api.local,IP:192.168.1.50 \
-./scripts/deploy-nodeport-gateway.sh
-```
-Скрипт сохранит материалы в `TLS_SECRET_NAME` и напомнит раздать доверенный CA клиентам (например, через переменную `GW_CA_DATA`).
-
-## 5. Внешний TLS-терминатор (KeenDNS и т.п.)
-Если TLS завершается на внешнем прокси, оставляйте шлюз в режиме NodePort и проксируйте внешний 443 на выданный порт. В Codex укажите `GW_ENDPOINT=https://<ваш-домен>`, чтобы помощник работал по HTTPS. В режиме `inject` обязательно ограничьте доступ на внешнем уровне — сам NodePort не требует аутентификации.
-
-## 6. Подготовка Codex Workspace
-Когда другому проекту Codex требуется `kubectl`, настройте его так, чтобы вспомогательные скрипты запускались из этого репозитория и не засоряли рабочий каталог.
-
-1. В разделе **Variables** добавьте координаты шлюза:
-   - *NodePort* — `GW_ENDPOINT=http://<ip-узла>:<node-port>` (скрипт развёртывания выводит подсказку с одним из IP и выданным NodePort). Переменные `GW_NODE` и `GW_NODE_PORT` по-прежнему поддерживаются, если хотите передавать хост и порт отдельно или доверить выбор схемы помощнику.
-   - *Ingress/HTTPS* — `GW_ENDPOINT=https://<ingress-хост>` (или `https://<ip>` вместе с `GW_TLS_SERVER_NAME=<имя-сертификата>` при самоподписанном сертификате). При необходимости добавьте `GW_CA_DATA`/`GW_CA_FILE`, если сертификат не доверенный.
-   - `HTTPS_BRIDGE_TARGET` — ваш HTTPS-эндпоинт (например, `https://example.com`), чтобы включить локальный HTTP→HTTPS мост.
-   - При необходимости добавьте и другие параметры, которые понимает `scripts/setup-codex-workspace.sh` (например, `GW_ENDPOINT`, `GW_AUTO_TLS_PORTS`, `KUBECTL_VERSION`, `SYNC_DEFAULT_KUBECONFIG`).
-2. В **Secrets** сохраните `K8S_TOKEN`, чтобы kubeconfig получил bearer-токен. Оставляйте секрет пустым только если прокси в кластере самостоятельно подставляет учётные данные.
-3. В выпадающем списке **Скрипт установки** выберите «Вручную» и вставьте следующий код. Он клонирует репозиторий в `/workspace`, запускает настройку и возвращается в исходный каталог. Переменная `PROJECT_PATH` нужна, чтобы скрипт добавил уведомление о работающем мосте и kubeconfig во все `AGENTS.md` вашего проекта.
-
+## 4. Обновление `authorized_keys`
+1. Подготовьте файл с публичными ключами.
+2. Выполните:
    ```bash
-   set -euo pipefail
-   export PROJECT_PATH="$(pwd)"
-   cd /workspace
-   if [ ! -d k8s-expose-apiserver ]; then
-     git clone https://github.com/GordeyTsy/k8s-expose-apiserver.git
-   fi
-   cd /workspace/k8s-expose-apiserver
-   ./scripts/setup-codex-workspace.sh
-   cd "$PROJECT_PATH"
+   kubectl -n ${SSH_NAMESPACE:-codex-ssh} create secret generic ${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys} \
+     --from-file=authorized_keys=./authorized_keys --dry-run=client -o yaml | kubectl apply -f -
    ```
+3. При необходимости перезапустите Deployment (`kubectl rollout restart`). Entry-point проверит наличие и права файла, сообщения об ошибках появятся в `kubectl logs`.
 
-4. В поле **Сценарий обслуживания** разместите:
+## 5. Инвентарь и переименования
+- `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl list`
+- `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl rename srv-01:22 prod-srv-01`
+- `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl export > inventory.json`
 
-   ```bash
-   set -euo pipefail
-   export PROJECT_PATH="$(pwd)"
-   cd /workspace/k8s-expose-apiserver || exit 0
-   ./scripts/setup-codex-workspace.sh
-   cd "$PROJECT_PATH"
-   ```
+Обёртки `ssh`, `scp`, `sftp` регистрируют подключения автоматически, анализируя параметры `-J`, `-p/-P`, `-o ProxyJump`. Fingerprint заполняется через `ssh-keyscan` (таймаут 5 секунд). Все изменения пишутся в PVC и сохраняются между рестартами.
 
-   Этот шаг выполняется после восстановления контейнера из кэша: он проверяет, что HTTPS-мост и `kubectl` работают, обновляет уведомление в `AGENTS.md` и перезапускает мост только при необходимости.
+## 6. Безопасность
+- Включён только пользователь `codex`; парольная аутентификация отключена.
+- `AuthorizedKeysFile` указывает на файл из секрета; права корректируются entrypoint’ом.
+- Проброшены только 22-й порт контейнера и NodePort/LoadBalancer сервиса.
+- MOTD напоминает об экспортных командах и о `codex-hostctl rename`.
 
-Сохраните настройки и перезапустите рабочую среду. При первом запуске установится `kubectl`, создастся kubeconfig, его копия попадёт в `~/.kube/config` (предварительно сделается резервная копия), запишется PID локального моста и появится заметка в `AGENTS.md`.
+## 7. Интеграция с Codex Workspace
+- Храните приватный ключ в секрете Codex (`SSH_KEY`), публичный ключ – в Kubernetes-секрете `authorized_keys`.
+- Рабочее пространство может синхронизировать список целей с помощью `codex-hostctl export` (через `kubectl exec`).
+- Для пользовательских меток используйте `codex-hostctl rename`; их значение сохраняется в `labels.json`.
 
-## 7. Проверка и сопровождение доступа
-- Kubeconfig сохраняется в `/workspace/k8s-expose-apiserver/configs/kubeconfig-nodeport`, а также зеркалируется в `~/.kube/config` (прошлый файл переименовывается в `config.bak`).
-- Если задан `HTTPS_BRIDGE_TARGET`, запускается локальный мост (по умолчанию `http://127.0.0.1:18080`), его PID сохраняется в `configs/https-bridge.pid`, а в каждый `AGENTS.md` внутри `PROJECT_PATH` добавляется уведомление (на английском) с информацией о PID и параметрах моста.
-- Базовые проверки:
-
-  ```bash
-  kubectl --request-timeout=10s version
-  kubectl get ns
-  ```
-
-- Диагностика моста:
-
-  ```bash
-  cat /workspace/k8s-expose-apiserver/configs/https-bridge.pid
-  ps -fp "$(cat /workspace/k8s-expose-apiserver/configs/https-bridge.pid)"
-  tail -f /workspace/k8s-expose-apiserver/configs/https-bridge.log
-  ```
-
-- Каждый повторный запуск того же скрипта (включая сценарий обслуживания) проверяет `kubectl`, обновляет уведомление в `AGENTS.md` и при сбоях перезапускает мост автоматически. Следуйте подсказкам по `NO_PROXY` и PATH, которые выводит скрипт.
-- Каждый запуск перед стартом нового моста пытается остановить процесс по PID из `configs/https-bridge.pid`, поэтому зависший экземпляр не мешает повторной настройке.
-- Скрипт завершается ошибкой, если команды `kubectl --request-timeout=5s version` и `kubectl --request-timeout=5s get ns`, выполненные с новым kubeconfig, не проходят — после успеха `kubectl` готов к работе сразу.
-
-## 8. Замечания по безопасности
-- `AUTH_MODE=inject` фактически выдаёт права cluster-admin любому, кто добрался до NodePort. Ограничьте доступ сетевыми политиками, файрволом или внешней аутентификацией и выставляйте `ALLOW_INJECT=1` только полностью осознавая риск.
-- Поверните сервисный токен, удалив секрет (`kubectl -n k8s-gw delete secret codex-gw-token`) и запустив скрипт развертывания повторно.
-- Храните токены рабочего пространства в разделе **Secrets** Codex, а не в обычных переменных или скриптах в Git.
-
-## 9. Очистка
+## 8. Сборка образа
+После обновления исходников обязательно соберите образ:
 ```bash
-kubectl delete -n k8s-gw service k8s-api-gw
-kubectl delete -n k8s-gw deployment k8s-api-gw
-kubectl delete -n k8s-gw configmap nginx-conf
-kubectl delete -n k8s-gw secret cluster-ca
-kubectl delete -n k8s-gw secret codex-gw-token
-kubectl delete clusterrolebinding codex-gw-admin
-kubectl delete -n k8s-gw serviceaccount codex-gw
-kubectl delete ns k8s-gw
-rm -f /workspace/k8s-expose-apiserver/configs/kubeconfig-nodeport
+docker build -t "${SSH_IMAGE_REGISTRY:-<public-registry>}/codex-ssh-bastion:latest" images/ssh-bastion
 ```
+и опубликуйте его в вашем реестре, прежде чем обновлять Deployment.

@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${SSH_DEPLOYMENT_NAME}
+  namespace: ${SSH_NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ssh-bastion
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ssh-bastion
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: codex-ssh-bastion
+          image: ${SSH_BASTION_IMAGE_REF}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 22
+              name: ssh
+          env:
+            - name: SSH_NAMESPACE
+              value: ${SSH_NAMESPACE}
+            - name: SSH_AUTHORIZED_SECRET
+              value: ${SSH_AUTHORIZED_SECRET}
+          volumeMounts:
+            - name: authorized-keys
+              mountPath: /config/authorized_keys
+              readOnly: true
+            - name: bastion-config
+              mountPath: /config/configmap
+              readOnly: true
+            - name: bastion-data
+              mountPath: /var/lib/codex-ssh
+            - name: motd-shared
+              mountPath: /config/motd
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - >-
+                    if command -v codex-hostctl >/dev/null 2>&1; then
+                      codex-hostctl export > /config/motd/inventory.json.tmp &&
+                      mv /config/motd/inventory.json.tmp /config/motd/inventory.json;
+                    fi
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - 'exec 3<>/dev/tcp/127.0.0.1/22 && echo -e "\x53\x48\x49" >&3 && sleep 1 && head -c 3 <&3'
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 22
+            initialDelaySeconds: 10
+            periodSeconds: 20
+      volumes:
+        - name: authorized-keys
+          secret:
+            secretName: ${SSH_AUTHORIZED_SECRET}
+            defaultMode: 0400
+        - name: bastion-config
+          configMap:
+            name: ${SSH_CONFIGMAP_NAME}
+            defaultMode: 0440
+        - name: bastion-data
+          persistentVolumeClaim:
+            claimName: ${SSH_PVC_NAME}
+        - name: motd-shared
+          emptyDir: {}
