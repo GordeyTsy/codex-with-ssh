@@ -24,15 +24,15 @@
   - `SSH_BASTION_ENDPOINT` или (`SSH_BASTION_HOST` + `SSH_BASTION_PORT`) – внешний адрес KeenDNS и NodePort; фактические значения: `codex-ssh.cyberspace.keenetic.link` и `32222`.
   - `SSH_PROXY_URL` – URL корпоративного прокси, который требуется обойти; храним как секрет.
   - `SSH_KEY` – приватный ключ доступа к SSH-поду. Обновление описано ниже.
-  - Переменные локальных override: путь к `~/.ssh/known_hosts` или кастомной подписи, например `SSH_KNOWN_HOSTS_FILE`.
+  - Дополнительные override: `SSH_IDENTITY_PATH`, `SSH_KNOWN_HOSTS_PATH`, `SSH_CONFIG_PATH`, `SSH_HOST_LABEL_OVERRIDES` (список `alias=Label` через запятую для человекочитаемых названий в отчёте).
 - **Обновление секрета `SSH_KEY`.**
   1. Сгенерировать ключ: `ssh-keygen -t ed25519 -f ./tmp/codex-ssh -C codex@workspace`.
   2. Записать публичную часть в Kubernetes secret и/или `authorized_keys` SSH-пода.
   3. В Codex workspace обновить секрет `SSH_KEY` через интерфейс Projects → Secrets.
-  4. Перезапустить `setup-codex-workspace.sh`, чтобы обновить `known_hosts` и перезаписать kubeconfig.
+  4. Перезапустить `setup-codex-workspace.sh`, чтобы обновить `known_hosts`, `ssh-config` и отчёт по инвентарю.
 
 ## Схема инвентаризации и переименование хостов
-- Используем `scripts/setup-codex-workspace.sh` для генерации `configs/hosts.json` с цепочками `ProxyJump`.
+- Используем `scripts/setup-codex-workspace.sh` для генерации `configs/ssh-hosts.json` с цепочками `ProxyJump`.
 - Команда `codex-hostctl rename <old> <new>` применяется внутри workspace, чтобы привести названия к корпоративному стандарту. Скрипт добавляет прокси-цепочки вида `codex-workspace → bastion → final-host`.
 - `setup-codex-workspace.sh` автоматически добавляет в `AGENTS.md` список целей и цепочек ProxyJump; ручные корректировки вносим после запуска скрипта.
 
@@ -44,5 +44,5 @@
 
 ## FAQ и обновление AGENTS
 - **Как обновить этот документ?** Вносим изменения через PR, соблюдая правило про реальные адреса.
-- **Что делает `setup-codex-workspace.sh`?** Скрипт подтягивает список доступных целей и цепочек ProxyJump из `configs/targets/*.json`, синхронизирует их в текущий `AGENTS.md` и помечает активный ключ `SSH_KEY`.
+- **Что делает `setup-codex-workspace.sh`?** Скрипт подтягивает список доступных целей и цепочек ProxyJump через `codex-hostctl export`, синхронизирует `configs/ssh-hosts.json`, обновляет `AGENTS.md` и помечает активный ключ `SSH_KEY`.
 - **Где искать конфигурацию ProxyJump?** После запуска скрипта сводная таблица целей доступна в `reports/ssh-inventory.md` и копируется сюда.
