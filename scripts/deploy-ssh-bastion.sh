@@ -116,6 +116,15 @@ case "${SSH_GENERATE_WORKSPACE_KEY}" in
     ;;
 esac
 
+case "${SSH_GENERATE_WORKSPACE_KEY}" in
+  true|false|auto)
+    ;;
+  *)
+    echo "SSH_GENERATE_WORKSPACE_KEY must be one of: auto, true, false" >&2
+    exit 1
+    ;;
+esac
+
 render() {
   local source="$1"
   local target="$2"
@@ -136,6 +145,9 @@ kubectl apply -f "${TMP_DIR}/namespace.yaml"
 SECRET_EXISTS=false
 if kubectl -n "${SSH_NAMESPACE}" get secret "${SSH_AUTHORIZED_SECRET}" >/dev/null 2>&1; then
   SECRET_EXISTS=true
+fi
+if [[ "${SSH_STORAGE_TYPE}" == "pvc" ]]; then
+  kubectl apply -f "${TMP_DIR}/pvc.yaml"
 fi
 
 GENERATE_WORKSPACE_KEY=false
@@ -166,7 +178,6 @@ if [[ -n "${SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
   kubectl -n "${SSH_NAMESPACE}" create secret generic "${SSH_AUTHORIZED_SECRET}" \
     --from-file=authorized_keys="${SSH_AUTHORIZED_KEYS_FILE}" \
     --dry-run=client -o yaml | kubectl apply -f -
-  SECRET_EXISTS=true
 elif [[ "${SECRET_EXISTS}" == false ]]; then
   echo "Secret ${SSH_AUTHORIZED_SECRET} does not exist and no key material was provided" >&2
   exit 1
