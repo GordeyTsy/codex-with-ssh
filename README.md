@@ -46,8 +46,8 @@ The script requires `kubectl` and `envsubst`. It generates a temporary directory
 | `SSH_PVC_NAME` | PersistentVolumeClaim name. | `codex-ssh-data` |
 | `SSH_PVC_SIZE` | Requested volume size. | `1Gi` |
 | `SSH_STORAGE_CLASS` | StorageClass (leave empty to use the cluster default). | — |
-| `SSH_STORAGE_TYPE` | Storage backend (`pvc` or `hostpath`). | `pvc` |
-| `SSH_HOSTPATH_PATH` | Node path for the hostPath volume (required when `SSH_STORAGE_TYPE=hostpath`). | — |
+| `SSH_STORAGE_TYPE` | Storage backend (`auto`, `pvc`, `hostpath`). | `auto` |
+| `SSH_HOSTPATH_PATH` | Node path for the hostPath volume (required when hostPath is selected). | — |
 | `SSH_CONFIGMAP_NAME` | ConfigMap name with the MOTD and `sshd_config` snippet. | `ssh-bastion-config` |
 | `SSH_AUTHORIZED_SECRET` | Secret that contains `authorized_keys`. | `ssh-authorized-keys` |
 | `SSH_BASTION_IMAGE` | Image tag without the registry prefix. | `codex-ssh-bastion:latest` |
@@ -58,7 +58,8 @@ The script requires `kubectl` and `envsubst`. It generates a temporary directory
 | `SSH_WORKSPACE_KEY_TYPE` | Key type for generation (`ed25519`, `rsa`, ...). | `ed25519` |
 | `SSH_WORKSPACE_KEY_COMMENT` | Comment stored in the generated key. | `codex@workspace` |
 
-When `SSH_STORAGE_TYPE=hostpath` the script skips the PVC manifest and mounts the supplied node path directly.
+When hostPath storage is selected (either explicitly via `SSH_STORAGE_TYPE=hostpath` or implicitly with `SSH_STORAGE_TYPE=auto`
+and `SSH_HOSTPATH_PATH` set), the script skips the PVC manifest and mounts the supplied node path directly.
 
 After applying the manifests the script prints reminders:
 - `kubectl -n <ns> rollout status deployment/<deploy>` – check the deployment rollout.
@@ -117,10 +118,10 @@ kubectl -n ${SSH_NAMESPACE:-codex-ssh} delete deployment/${SSH_DEPLOYMENT_NAME:-
   configmap/${SSH_CONFIGMAP_NAME:-ssh-bastion-config} \
   secret/${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys}
 
-# Remove the PVC when it is in use (skip for hostPath)
+# Remove the PVC when it is in use (skip for hostPath storage)
 kubectl -n ${SSH_NAMESPACE:-codex-ssh} delete pvc/${SSH_PVC_NAME:-codex-ssh-data}
 
 # Delete the namespace only if it is dedicated to the bastion
 kubectl delete namespace ${SSH_NAMESPACE:-codex-ssh}
 ```
-When `SSH_STORAGE_TYPE=hostpath` remove the on-node directory manually if it is no longer needed.
+When hostPath storage is in use, remove the on-node directory manually if it is no longer needed.

@@ -23,7 +23,7 @@ SSH_SERVICE_NODE_PORT=${SSH_SERVICE_NODE_PORT:-32222}
 SSH_PVC_NAME=${SSH_PVC_NAME:-codex-ssh-data}
 SSH_PVC_SIZE=${SSH_PVC_SIZE:-1Gi}
 SSH_STORAGE_CLASS=${SSH_STORAGE_CLASS:-}
-SSH_STORAGE_TYPE=${SSH_STORAGE_TYPE:-pvc}
+SSH_STORAGE_TYPE=${SSH_STORAGE_TYPE:-auto}
 SSH_HOSTPATH_PATH=${SSH_HOSTPATH_PATH:-}
 SSH_CONFIGMAP_NAME=${SSH_CONFIGMAP_NAME:-ssh-bastion-config}
 SSH_AUTHORIZED_SECRET=${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys}
@@ -54,21 +54,36 @@ else
 fi
 
 case "${SSH_STORAGE_TYPE}" in
+  auto)
+    if [[ -n "${SSH_HOSTPATH_PATH}" ]]; then
+      EFFECTIVE_STORAGE_TYPE=hostpath
+    else
+      EFFECTIVE_STORAGE_TYPE=pvc
+    fi
+    ;;
+  pvc|hostpath)
+    EFFECTIVE_STORAGE_TYPE="${SSH_STORAGE_TYPE}"
+    ;;
+  *)
+    echo "SSH_STORAGE_TYPE must be one of: auto, pvc, hostpath" >&2
+    exit 1
+    ;;
+esac
+
+case "${EFFECTIVE_STORAGE_TYPE}" in
   pvc)
     SSH_DATA_VOLUME_BLOCK=$'        - name: bastion-data\n          persistentVolumeClaim:\n            claimName: '"${SSH_PVC_NAME}"
     ;;
   hostpath)
     if [[ -z "${SSH_HOSTPATH_PATH}" ]]; then
-      echo "SSH_HOSTPATH_PATH must be set when SSH_STORAGE_TYPE=hostpath" >&2
+      echo "SSH_HOSTPATH_PATH must be set when using hostPath storage" >&2
       exit 1
     fi
     SSH_DATA_VOLUME_BLOCK=$'        - name: bastion-data\n          hostPath:\n            path: '"${SSH_HOSTPATH_PATH}"$'\n            type: DirectoryOrCreate'
     ;;
-  *)
-    echo "Unsupported SSH_STORAGE_TYPE: ${SSH_STORAGE_TYPE}. Use pvc or hostpath." >&2
-    exit 1
-    ;;
 esac
+
+printf 'Using %s storage for bastion data\n' "${EFFECTIVE_STORAGE_TYPE}"
 
 if [[ -n "${SSH_NODE_NAME}" ]]; then
   SSH_NODE_PLACEMENT_BLOCK=$'      nodeName: '"${SSH_NODE_NAME}"
@@ -90,7 +105,16 @@ export SSH_NAMESPACE SSH_DEPLOYMENT_NAME SSH_SERVICE_NAME SSH_SERVICE_TYPE \
   SSH_SERVICE_NODE_PORT SSH_SERVICE_NODE_PORT_LINE SSH_PVC_NAME SSH_PVC_SIZE \
   SSH_STORAGE_CLASS_BLOCK SSH_CONFIGMAP_NAME SSH_AUTHORIZED_SECRET \
   SSH_BASTION_IMAGE_REF SSH_MOTD_CONTENT_BLOCK SSH_DATA_VOLUME_BLOCK \
-  SSH_NODE_PLACEMENT_BLOCK SSH_STORAGE_TYPE
+  SSH_NODE_PLACEMENT_BLOCK EFFECTIVE_STORAGE_TYPE
+
+case "${SSH_GENERATE_WORKSPACE_KEY}" in
+  true|false|auto)
+    ;;
+  *)
+    echo "SSH_GENERATE_WORKSPACE_KEY must be one of: auto, true, false" >&2
+    exit 1
+    ;;
+esac
 
 case "${SSH_GENERATE_WORKSPACE_KEY}" in
   true|false|auto)
@@ -108,7 +132,7 @@ render() {
 }
 
 render "${MANIFEST_DIR}/namespace.yaml" "${TMP_DIR}/namespace.yaml"
-if [[ "${SSH_STORAGE_TYPE}" == "pvc" ]]; then
+if [[ "${EFFECTIVE_STORAGE_TYPE}" == "pvc" ]]; then
   render "${MANIFEST_DIR}/pvc.yaml" "${TMP_DIR}/pvc.yaml"
 fi
 render "${MANIFEST_DIR}/configmap.yaml" "${TMP_DIR}/configmap.yaml"
@@ -125,9 +149,6 @@ fi
 if [[ "${SSH_STORAGE_TYPE}" == "pvc" ]]; then
   kubectl apply -f "${TMP_DIR}/pvc.yaml"
 fi
-kubectl apply -f "${TMP_DIR}/configmap.yaml"
-kubectl apply -f "${TMP_DIR}/deployment.yaml"
-kubectl apply -f "${TMP_DIR}/service.yaml"
 
 GENERATE_WORKSPACE_KEY=false
 if [[ -n "${SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
@@ -161,6 +182,13 @@ elif [[ "${SECRET_EXISTS}" == false ]]; then
   echo "Secret ${SSH_AUTHORIZED_SECRET} does not exist and no key material was provided" >&2
   exit 1
 fi
+
+if [[ "${EFFECTIVE_STORAGE_TYPE}" == "pvc" ]]; then
+  kubectl apply -f "${TMP_DIR}/pvc.yaml"
+fi
+kubectl apply -f "${TMP_DIR}/configmap.yaml"
+kubectl apply -f "${TMP_DIR}/deployment.yaml"
+kubectl apply -f "${TMP_DIR}/service.yaml"
 
 cat <<INFO
 ---

@@ -49,8 +49,8 @@ scripts/deploy-ssh-bastion.sh
 | `SSH_PVC_NAME` | `codex-ssh-data` | Имя PersistentVolumeClaim. |
 | `SSH_PVC_SIZE` | `1Gi` | Запрашиваемый объём диска. |
 | `SSH_STORAGE_CLASS` | — | StorageClass. Оставьте пустым для значения по умолчанию. |
-| `SSH_STORAGE_TYPE` | `pvc` | Тип хранилища (`pvc` или `hostpath`). |
-| `SSH_HOSTPATH_PATH` | — | Путь на узле для `hostPath` (обязателен при `SSH_STORAGE_TYPE=hostpath`). |
+| `SSH_STORAGE_TYPE` | `auto` | Тип хранилища (`auto`, `pvc` или `hostpath`). |
+| `SSH_HOSTPATH_PATH` | — | Путь на узле для `hostPath` (обязателен, когда выбран hostPath). |
 | `SSH_CONFIGMAP_NAME` | `ssh-bastion-config` | Имя ConfigMap с MOTD и `sshd_config`. |
 | `SSH_AUTHORIZED_SECRET` | `ssh-authorized-keys` | Секрет с публичными ключами. |
 | `SSH_BASTION_IMAGE` | `codex-ssh-bastion:latest` | Имя и тег образа без префикса реестра. |
@@ -61,7 +61,8 @@ scripts/deploy-ssh-bastion.sh
 | `SSH_WORKSPACE_KEY_TYPE` | `ed25519` | Тип ключа при генерации (`ed25519`, `rsa`, ...). |
 | `SSH_WORKSPACE_KEY_COMMENT` | `codex@workspace` | Комментарий, добавляемый к сгенерированному ключу. |
 
-При `SSH_STORAGE_TYPE=hostpath` скрипт пропускает создание PVC и монтирует указанную директорию узла напрямую.
+Если выбран hostPath (явно через `SSH_STORAGE_TYPE=hostpath` или неявно при `SSH_STORAGE_TYPE=auto` и заданном `SSH_HOSTPATH_PATH`),
+скрипт пропускает создание PVC и монтирует указанную директорию узла напрямую.
 
 ## 4. Обновление `authorized_keys`
 1. По умолчанию скрипт развёртывания создаёт новую пару ключей, если секрет `authorized_keys` отсутствует, и выводит приватный ключ для секрета Codex (`SSH_KEY`).
@@ -111,10 +112,10 @@ kubectl -n ${SSH_NAMESPACE:-codex-ssh} delete deployment/${SSH_DEPLOYMENT_NAME:-
   configmap/${SSH_CONFIGMAP_NAME:-ssh-bastion-config} \
   secret/${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys}
 
-# Удалите PVC, если он использовался (для hostPath пропустите)
+# Удалите PVC, если он использовался (при hostPath пропустите)
 kubectl -n ${SSH_NAMESPACE:-codex-ssh} delete pvc/${SSH_PVC_NAME:-codex-ssh-data}
 
 # Namespace удаляйте только если он выделен под бастион
 kubectl delete namespace ${SSH_NAMESPACE:-codex-ssh}
 ```
-При `SSH_STORAGE_TYPE=hostpath` удалите директорию на узле вручную, если она больше не нужна.
+Если используется hostPath, удалите директорию на узле вручную, если она больше не нужна.
