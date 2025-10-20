@@ -32,11 +32,10 @@ SSH_SERVICE_NODE_PORT=32222 \
 SSH_IMAGE_REGISTRY=ghcr.io/gordeytsy \
 SSH_BASTION_IMAGE=codex-ssh-bastion:latest \
 SSH_AUTHORIZED_SECRET=ssh-authorized-keys \
-SSH_AUTHORIZED_KEYS_FILE=./authorized_keys \
 scripts/deploy-ssh-bastion.sh
 ```
 
-Скрипт создаёт временные файлы, прогоняет их через `envsubst` и применяет `kubectl apply`. При наличии `SSH_AUTHORIZED_KEYS_FILE` секрет перегенерируется автоматически. После выполнения вы увидите подсказки по rollout, сервису, тестовому `ssh` и обновлению секрета.
+Скрипт создаёт временные файлы, прогоняет их через `envsubst` и применяет `kubectl apply`. Если секрет `authorized_keys` отсутствует, скрипт сгенерирует новую пару ключей `ed25519` (тип можно изменить) и выведет приватный ключ, который нужно сохранить в секрет Codex. При наличии `SSH_AUTHORIZED_KEYS_FILE` секрет перегенерируется из указанного файла вместо генерации ключа.
 
 ### 3.1 Переменные окружения
 | Переменная | Значение по умолчанию | Описание |
@@ -58,17 +57,21 @@ scripts/deploy-ssh-bastion.sh
 | `SSH_IMAGE_REGISTRY` | — | Префикс реестра (`registry.example.com/team`). |
 | `SSH_MOTD_CONTENT` | `Codex SSH bastion\nИспользуйте codex-hostctl list, чтобы увидеть найденные цели.` | Базовое сообщение MOTD. |
 | `SSH_AUTHORIZED_KEYS_FILE` | — | Путь до `authorized_keys`; при указании секрет обновится автоматически. |
+| `SSH_GENERATE_WORKSPACE_KEY` | `auto` | Управление генерацией ключа для Codex (`auto`, `true`, `false`). |
+| `SSH_WORKSPACE_KEY_TYPE` | `ed25519` | Тип ключа при генерации (`ed25519`, `rsa`, ...). |
+| `SSH_WORKSPACE_KEY_COMMENT` | `codex@workspace` | Комментарий, добавляемый к сгенерированному ключу. |
 
 При `SSH_STORAGE_TYPE=hostpath` скрипт пропускает создание PVC и монтирует указанную директорию узла напрямую.
 
 ## 4. Обновление `authorized_keys`
-1. Подготовьте файл с публичными ключами.
-2. Выполните:
+1. По умолчанию скрипт развёртывания создаёт новую пару ключей, если секрет `authorized_keys` отсутствует, и выводит приватный ключ для секрета Codex (`SSH_KEY`).
+2. Чтобы управлять секретом вручную, подготовьте файл с публичными ключами.
+3. Выполните:
    ```bash
    kubectl -n ${SSH_NAMESPACE:-codex-ssh} create secret generic ${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys} \
      --from-file=authorized_keys=./authorized_keys --dry-run=client -o yaml | kubectl apply -f -
    ```
-3. При необходимости перезапустите Deployment (`kubectl rollout restart`). Entry-point проверит наличие и права файла; сообщения об ошибках появятся в `kubectl logs`.
+4. При необходимости перезапустите Deployment (`kubectl rollout restart`). Entry-point проверит наличие и права файла; сообщения об ошибках появятся в `kubectl logs`.
 
 ## 5. Инвентарь и переименования
 - `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl list`

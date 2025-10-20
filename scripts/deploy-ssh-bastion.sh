@@ -31,6 +31,9 @@ SSH_BASTION_IMAGE=${SSH_BASTION_IMAGE:-codex-ssh-bastion:latest}
 SSH_IMAGE_REGISTRY=${SSH_IMAGE_REGISTRY:-}
 SSH_MOTD_CONTENT=${SSH_MOTD_CONTENT:-"Codex SSH bastion\nИспользуйте codex-hostctl list, чтобы увидеть найденные цели."}
 SSH_NODE_NAME=${SSH_NODE_NAME:-}
+SSH_GENERATE_WORKSPACE_KEY=${SSH_GENERATE_WORKSPACE_KEY:-auto}
+SSH_WORKSPACE_KEY_TYPE=${SSH_WORKSPACE_KEY_TYPE:-ed25519}
+SSH_WORKSPACE_KEY_COMMENT=${SSH_WORKSPACE_KEY_COMMENT:-codex@workspace}
 
 if [[ -n "${SSH_IMAGE_REGISTRY}" ]]; then
   SSH_BASTION_IMAGE_REF="${SSH_IMAGE_REGISTRY%/}/${SSH_BASTION_IMAGE}"
@@ -89,6 +92,15 @@ export SSH_NAMESPACE SSH_DEPLOYMENT_NAME SSH_SERVICE_NAME SSH_SERVICE_TYPE \
   SSH_BASTION_IMAGE_REF SSH_MOTD_CONTENT_BLOCK SSH_DATA_VOLUME_BLOCK \
   SSH_NODE_PLACEMENT_BLOCK SSH_STORAGE_TYPE
 
+case "${SSH_GENERATE_WORKSPACE_KEY}" in
+  true|false|auto)
+    ;;
+  *)
+    echo "SSH_GENERATE_WORKSPACE_KEY must be one of: auto, true, false" >&2
+    exit 1
+    ;;
+esac
+
 render() {
   local source="$1"
   local target="$2"
@@ -105,6 +117,11 @@ render "${MANIFEST_DIR}/service.yaml" "${TMP_DIR}/service.yaml"
 
 printf 'Applying manifests to namespace %s\n' "${SSH_NAMESPACE}"
 kubectl apply -f "${TMP_DIR}/namespace.yaml"
+
+SECRET_EXISTS=false
+if kubectl -n "${SSH_NAMESPACE}" get secret "${SSH_AUTHORIZED_SECRET}" >/dev/null 2>&1; then
+  SECRET_EXISTS=true
+fi
 if [[ "${SSH_STORAGE_TYPE}" == "pvc" ]]; then
   kubectl apply -f "${TMP_DIR}/pvc.yaml"
 fi
@@ -112,11 +129,37 @@ kubectl apply -f "${TMP_DIR}/configmap.yaml"
 kubectl apply -f "${TMP_DIR}/deployment.yaml"
 kubectl apply -f "${TMP_DIR}/service.yaml"
 
+GENERATE_WORKSPACE_KEY=false
+if [[ -n "${SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
+  :
+elif [[ "${SSH_GENERATE_WORKSPACE_KEY}" == "true" ]]; then
+  GENERATE_WORKSPACE_KEY=true
+elif [[ "${SSH_GENERATE_WORKSPACE_KEY}" == "auto" && "${SECRET_EXISTS}" == false ]]; then
+  GENERATE_WORKSPACE_KEY=true
+fi
+
+WORKSPACE_PRIVATE_KEY_PATH=""
+if [[ "${GENERATE_WORKSPACE_KEY}" == true ]]; then
+  command -v ssh-keygen >/dev/null 2>&1 || {
+    echo "ssh-keygen is required when SSH_GENERATE_WORKSPACE_KEY is enabled" >&2
+    exit 1
+  }
+  WORKSPACE_KEY_BASE="${TMP_DIR}/codex-workspace-key"
+  ssh-keygen -t "${SSH_WORKSPACE_KEY_TYPE}" -N "" -C "${SSH_WORKSPACE_KEY_COMMENT}" \
+    -f "${WORKSPACE_KEY_BASE}" >/dev/null
+  SSH_AUTHORIZED_KEYS_FILE="${WORKSPACE_KEY_BASE}.pub"
+  WORKSPACE_PRIVATE_KEY_PATH="${WORKSPACE_KEY_BASE}"
+  printf 'Generated new workspace key pair (%s)\n' "${SSH_WORKSPACE_KEY_TYPE}"
+fi
+
 if [[ -n "${SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
   printf 'Updating authorized_keys secret %s\n' "${SSH_AUTHORIZED_SECRET}"
   kubectl -n "${SSH_NAMESPACE}" create secret generic "${SSH_AUTHORIZED_SECRET}" \
     --from-file=authorized_keys="${SSH_AUTHORIZED_KEYS_FILE}" \
     --dry-run=client -o yaml | kubectl apply -f -
+elif [[ "${SECRET_EXISTS}" == false ]]; then
+  echo "Secret ${SSH_AUTHORIZED_SECRET} does not exist and no key material was provided" >&2
+  exit 1
 fi
 
 cat <<INFO
@@ -142,3 +185,9 @@ Deployment applied.
   kubectl -n ${SSH_NAMESPACE} exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl export
 ---
 INFO
+
+if [[ -n "${WORKSPACE_PRIVATE_KEY_PATH}" ]]; then
+  printf '\nСохраните приватный ключ для Codex Workspace (секрет SSH_KEY):\n\n'
+  cat "${WORKSPACE_PRIVATE_KEY_PATH}"
+  printf '\n'
+fi
