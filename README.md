@@ -29,11 +29,10 @@ SSH_SERVICE_NODE_PORT=32222 \
 SSH_BASTION_IMAGE=codex-ssh-bastion:latest \
 SSH_IMAGE_REGISTRY=ghcr.io/gordeytsy \
 SSH_AUTHORIZED_SECRET=ssh-authorized-keys \
-SSH_AUTHORIZED_KEYS_FILE=./authorized_keys \
 scripts/deploy-ssh-bastion.sh
 ```
 
-The script requires `kubectl` and `envsubst`. It generates a temporary directory with manifests and applies the Namespace, PVC, ConfigMap, Deployment, and Service in sequence. When `SSH_AUTHORIZED_KEYS_FILE` is present, the secret is refreshed with `kubectl create secret generic ... --dry-run=client | kubectl apply -f -`.
+The script requires `kubectl` and `envsubst`. It generates a temporary directory with manifests and applies the Namespace, PVC, ConfigMap, Deployment, and Service in sequence. When the `authorized_keys` secret is missing, the script creates a fresh `ed25519` key pair (configurable) and prints the private key so it can be stored as the Codex workspace secret. When `SSH_AUTHORIZED_KEYS_FILE` is present, the secret is refreshed with `kubectl create secret generic ... --dry-run=client | kubectl apply -f -` instead of generating a new key.
 
 ### 3.1 Configurable variables
 | Variable | Purpose | Default |
@@ -55,6 +54,9 @@ The script requires `kubectl` and `envsubst`. It generates a temporary directory
 | `SSH_IMAGE_REGISTRY` | Registry prefix (leave empty if the tag is already fully qualified). | — |
 | `SSH_MOTD_CONTENT` | Base MOTD text (split into lines). | `Codex SSH bastion\nИспользуйте codex-hostctl list, чтобы увидеть найденные цели.` |
 | `SSH_AUTHORIZED_KEYS_FILE` | Local path to the `authorized_keys` file for secret refresh. | — |
+| `SSH_GENERATE_WORKSPACE_KEY` | Auto-generate a workspace key pair (`auto`, `true`, `false`). | `auto` |
+| `SSH_WORKSPACE_KEY_TYPE` | Key type for generation (`ed25519`, `rsa`, ...). | `ed25519` |
+| `SSH_WORKSPACE_KEY_COMMENT` | Comment stored in the generated key. | `codex@workspace` |
 
 When `SSH_STORAGE_TYPE=hostpath` the script skips the PVC manifest and mounts the supplied node path directly.
 
@@ -66,14 +68,15 @@ After applying the manifests the script prints reminders:
 - Command to export the inventory: `kubectl exec ... -- codex-hostctl export`.
 
 ## 4. Managing the `authorized_keys` secret
-1. Prepare an `authorized_keys` file (for example, `ssh-keygen -t ed25519 -f ./codex-ssh && cat codex-ssh.pub > authorized_keys`).
-2. Update the secret:
+1. By default the deployment script generates a new key pair whenever the `authorized_keys` secret is missing and prints the private key for the Codex workspace secret (`SSH_KEY`).
+2. To manage the secret manually, prepare an `authorized_keys` file (for example, `ssh-keygen -t ed25519 -f ./codex-ssh && cat codex-ssh.pub > authorized_keys`).
+3. Update the secret:
    ```bash
    kubectl -n ${SSH_NAMESPACE:-codex-ssh} create secret generic ${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys} \
      --from-file=authorized_keys=./authorized_keys --dry-run=client -o yaml | kubectl apply -f -
    ```
-3. Restart the deployment if needed: `kubectl -n ${SSH_NAMESPACE} rollout restart deployment/${SSH_DEPLOYMENT_NAME}`.
-4. Inspect the logs: `kubectl -n ${SSH_NAMESPACE} logs deployment/${SSH_DEPLOYMENT_NAME}` – the entrypoint warns when keys are missing or have incorrect permissions.
+4. Restart the deployment if needed: `kubectl -n ${SSH_NAMESPACE} rollout restart deployment/${SSH_DEPLOYMENT_NAME}`.
+5. Inspect the logs: `kubectl -n ${SSH_NAMESPACE} logs deployment/${SSH_DEPLOYMENT_NAME}` – the entrypoint warns when keys are missing or have incorrect permissions.
 
 ## 5. Working with `codex-hostctl`
 Inside the pod the files `/var/lib/codex-ssh/inventory.json` and `/var/lib/codex-ssh/labels.json` are available. Common scenarios:
