@@ -13,6 +13,7 @@ spec:
       labels:
         app.kubernetes.io/name: ssh-bastion
     spec:
+${SSH_NODE_PLACEMENT_BLOCK}
       securityContext:
         fsGroup: 1000
       containers:
@@ -71,8 +72,6 @@ spec:
           configMap:
             name: ${SSH_CONFIGMAP_NAME}
             defaultMode: 0440
-        - name: bastion-data
-          persistentVolumeClaim:
-            claimName: ${SSH_PVC_NAME}
+${SSH_DATA_VOLUME_BLOCK}
         - name: motd-shared
           emptyDir: {}
