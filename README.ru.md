@@ -32,11 +32,10 @@ SSH_SERVICE_NODE_PORT=32222 \
 SSH_IMAGE_REGISTRY=ghcr.io/gordeytsy \
 SSH_BASTION_IMAGE=codex-ssh-bastion:latest \
 SSH_AUTHORIZED_SECRET=ssh-authorized-keys \
-SSH_AUTHORIZED_KEYS_FILE=./authorized_keys \
 scripts/deploy-ssh-bastion.sh
 ```
 
-Скрипт создаёт временные файлы, прогоняет их через `envsubst` и применяет `kubectl apply`. При наличии `SSH_AUTHORIZED_KEYS_FILE` секрет перегенерируется автоматически. После выполнения вы увидите подсказки по rollout, сервису, тестовому `ssh` и обновлению секрета.
+Скрипт создаёт временные файлы, прогоняет их через `envsubst` и применяет `kubectl apply`. Если секрет `authorized_keys` отсутствует, скрипт сгенерирует новую пару ключей `ed25519` (тип можно изменить) и выведет приватный ключ, который нужно сохранить в секрет Codex. При наличии `SSH_AUTHORIZED_KEYS_FILE` секрет перегенерируется из указанного файла вместо генерации ключа.
 
 ### 3.1 Переменные окружения
 | Переменная | Значение по умолчанию | Описание |
@@ -50,25 +49,30 @@ scripts/deploy-ssh-bastion.sh
 | `SSH_PVC_NAME` | `codex-ssh-data` | Имя PersistentVolumeClaim. |
 | `SSH_PVC_SIZE` | `1Gi` | Запрашиваемый объём диска. |
 | `SSH_STORAGE_CLASS` | — | StorageClass. Оставьте пустым для значения по умолчанию. |
-| `SSH_STORAGE_TYPE` | `pvc` | Тип хранилища (`pvc` или `hostpath`). |
-| `SSH_HOSTPATH_PATH` | — | Путь на узле для `hostPath` (обязателен при `SSH_STORAGE_TYPE=hostpath`). |
+| `SSH_STORAGE_TYPE` | `auto` | Тип хранилища (`auto`, `pvc` или `hostpath`). |
+| `SSH_HOSTPATH_PATH` | — | Путь на узле для `hostPath` (обязателен, когда выбран hostPath). |
 | `SSH_CONFIGMAP_NAME` | `ssh-bastion-config` | Имя ConfigMap с MOTD и `sshd_config`. |
 | `SSH_AUTHORIZED_SECRET` | `ssh-authorized-keys` | Секрет с публичными ключами. |
 | `SSH_BASTION_IMAGE` | `codex-ssh-bastion:latest` | Имя и тег образа без префикса реестра. |
 | `SSH_IMAGE_REGISTRY` | — | Префикс реестра (`registry.example.com/team`). |
 | `SSH_MOTD_CONTENT` | `Codex SSH bastion\nИспользуйте codex-hostctl list, чтобы увидеть найденные цели.` | Базовое сообщение MOTD. |
 | `SSH_AUTHORIZED_KEYS_FILE` | — | Путь до `authorized_keys`; при указании секрет обновится автоматически. |
+| `SSH_GENERATE_WORKSPACE_KEY` | `auto` | Управление генерацией ключа для Codex (`auto`, `true`, `false`). |
+| `SSH_WORKSPACE_KEY_TYPE` | `ed25519` | Тип ключа при генерации (`ed25519`, `rsa`, ...). |
+| `SSH_WORKSPACE_KEY_COMMENT` | `codex@workspace` | Комментарий, добавляемый к сгенерированному ключу. |
 
-При `SSH_STORAGE_TYPE=hostpath` скрипт пропускает создание PVC и монтирует указанную директорию узла напрямую.
+Если выбран hostPath (явно через `SSH_STORAGE_TYPE=hostpath` или неявно при `SSH_STORAGE_TYPE=auto` и заданном `SSH_HOSTPATH_PATH`),
+скрипт пропускает создание PVC и монтирует указанную директорию узла напрямую.
 
 ## 4. Обновление `authorized_keys`
-1. Подготовьте файл с публичными ключами.
-2. Выполните:
+1. По умолчанию скрипт развёртывания создаёт новую пару ключей, если секрет `authorized_keys` отсутствует, и выводит приватный ключ для секрета Codex (`SSH_KEY`).
+2. Чтобы управлять секретом вручную, подготовьте файл с публичными ключами.
+3. Выполните:
    ```bash
    kubectl -n ${SSH_NAMESPACE:-codex-ssh} create secret generic ${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys} \
      --from-file=authorized_keys=./authorized_keys --dry-run=client -o yaml | kubectl apply -f -
    ```
-3. При необходимости перезапустите Deployment (`kubectl rollout restart`). Entry-point проверит наличие и права файла; сообщения об ошибках появятся в `kubectl logs`.
+4. При необходимости перезапустите Deployment (`kubectl rollout restart`). Entry-point проверит наличие и права файла; сообщения об ошибках появятся в `kubectl logs`.
 
 ## 5. Инвентарь и переименования
 - `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl list`
@@ -108,10 +112,10 @@ kubectl -n ${SSH_NAMESPACE:-codex-ssh} delete deployment/${SSH_DEPLOYMENT_NAME:-
   configmap/${SSH_CONFIGMAP_NAME:-ssh-bastion-config} \
   secret/${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys}
 
-# Удалите PVC, если он использовался (для hostPath пропустите)
+# Удалите PVC, если он использовался (при hostPath пропустите)
 kubectl -n ${SSH_NAMESPACE:-codex-ssh} delete pvc/${SSH_PVC_NAME:-codex-ssh-data}
 
 # Namespace удаляйте только если он выделен под бастион
 kubectl delete namespace ${SSH_NAMESPACE:-codex-ssh}
 ```
-При `SSH_STORAGE_TYPE=hostpath` удалите директорию на узле вручную, если она больше не нужна.
+Если используется hostPath, удалите директорию на узле вручную, если она больше не нужна.
