@@ -240,7 +240,7 @@ start_chisel_bridge() {
   if [[ -n "${SSH_PROXY_URL}" ]]; then
     cmd+=("--proxy" "${SSH_PROXY_URL}")
   fi
-  cmd+=("${target}" "L:127.0.0.1:${SSH_TUNNEL_LOCAL_PORT}:127.0.0.1:22")
+  cmd+=("${target}" "127.0.0.1:${SSH_TUNNEL_LOCAL_PORT}:127.0.0.1:22")
   log_info "Starting chisel tunnel to ${target} (local port ${SSH_TUNNEL_LOCAL_PORT})"
   nohup "${cmd[@]}" >>"${SSH_CHISEL_LOG_FILE}" 2>&1 &
   local pid=$!
