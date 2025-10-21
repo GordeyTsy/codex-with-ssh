@@ -90,6 +90,7 @@ SSH_CHISEL_BIN="${SSH_CHISEL_BIN:-${ROOT_DIR}/bin/chisel}"
 SSH_CHISEL_VERSION="${SSH_CHISEL_VERSION:-1.9.1}"
 SSH_CHISEL_PID_FILE="${SSH_CHISEL_PID_FILE:-${CONFIG_DIR}/ssh-chisel.pid}"
 SSH_CHISEL_LOG_FILE="${SSH_CHISEL_LOG_FILE:-${CONFIG_DIR}/ssh-chisel.log}"
+SSH_CHISEL_LOG_LINES="${SSH_CHISEL_LOG_LINES:-200}"
 
 parse_bastion_endpoint() {
   "${PYTHON_BIN}" <<'PY'
@@ -199,6 +200,14 @@ stop_chisel() {
   fi
 }
 
+print_chisel_log() {
+  local lines="${SSH_CHISEL_LOG_LINES}"
+  if [[ -f "${SSH_CHISEL_LOG_FILE}" ]]; then
+    >&2 printf '==> chisel log tail (%s lines)\n' "${lines}"
+    >&2 tail -n "${lines}" "${SSH_CHISEL_LOG_FILE}"
+  fi
+}
+
 wait_for_local_port() {
   local host="$1"
   local port="$2"
@@ -276,6 +285,7 @@ ensure_file_permissions "${SSH_IDENTITY_PATH}" 600
 
 if ! start_chisel_bridge; then
   log_error "Failed to establish chisel tunnel. See ${SSH_CHISEL_LOG_FILE}."
+  print_chisel_log
   exit 1
 fi
 
