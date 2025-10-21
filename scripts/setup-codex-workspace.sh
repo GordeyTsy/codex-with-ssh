@@ -93,7 +93,7 @@ SSH_CHISEL_LOG_FILE="${SSH_CHISEL_LOG_FILE:-${CONFIG_DIR}/ssh-chisel.log}"
 SSH_CHISEL_LOG_LINES="${SSH_CHISEL_LOG_LINES:-200}"
 
 parse_bastion_endpoint() {
-  "${PYTHON_BIN}" <<'PY'
+  "${PYTHON_BIN}" - <<'PY'
 import os
 import sys
 from urllib.parse import urlparse
@@ -339,7 +339,7 @@ write_config_block() {
   local tmp_file
   tmp_file="$(mktemp)"
   printf '%s\n' "${config_block}" >"${tmp_file}"
-  "${PYTHON_BIN}" <<'PY' "${SSH_CONFIG_PATH}" "${marker_begin}" "${marker_end}" "${tmp_file}"
+  "${PYTHON_BIN}" - "${SSH_CONFIG_PATH}" "${marker_begin}" "${marker_end}" "${tmp_file}" <<'PY'
 import pathlib
 import sys
 
@@ -412,7 +412,7 @@ else
   INVENTORY_STATUS="missing"
 fi
 
-"${PYTHON_BIN}" <<'PY' "${INVENTORY_STATUS}" "${SSH_INVENTORY_PATH}" "${SSH_IDENTITY_PATH}" "${SSH_KNOWN_HOSTS_PATH}" "${SUMMARY_FILE}" "${SCAN_FILE}" "${CONFIG_FILE}" "${SSH_HOST_LABEL_OVERRIDES:-}" "${SSH_GW_NODE}" "${SSH_TUNNEL_LOCAL_PORT}" "${SSH_CHISEL_PID_FILE}" "${SSH_CHISEL_LOG_FILE}" 
+"${PYTHON_BIN}" - "${INVENTORY_STATUS}" "${SSH_INVENTORY_PATH}" "${SSH_IDENTITY_PATH}" "${SSH_KNOWN_HOSTS_PATH}" "${SUMMARY_FILE}" "${SCAN_FILE}" "${CONFIG_FILE}" "${SSH_HOST_LABEL_OVERRIDES:-}" "${SSH_GW_NODE}" "${SSH_TUNNEL_LOCAL_PORT}" "${SSH_CHISEL_PID_FILE}" "${SSH_CHISEL_LOG_FILE}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -669,7 +669,7 @@ mapfile -t agents_files < <(find "${AGENTS_SEARCH_PATHS[@]}" -name AGENTS.md -ty
 if [[ ${#agents_files[@]} -gt 0 ]]; then
   SUMMARY_TMP="$(mktemp)"
   printf '%s' "${SUMMARY_CONTENT}" >"${SUMMARY_TMP}"
-  "${PYTHON_BIN}" <<'PY' "${SUMMARY_TMP}" "${#agents_files[@]}" "${agents_files[@]}"
+  "${PYTHON_BIN}" - "${SUMMARY_TMP}" "${#agents_files[@]}" "${agents_files[@]}" <<'PY'
 import pathlib
 import sys
 
