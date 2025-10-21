@@ -1,16 +1,15 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${SSH_SERVICE_NAME}
+  name: ${SSH_SERVICE_NAME}-internal
   namespace: ${SSH_NAMESPACE}
   labels:
     app.kubernetes.io/name: ssh-bastion
 spec:
-  type: ${SSH_SERVICE_TYPE}
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: ssh-bastion
   ports:
-    - name: chisel
-      port: ${SSH_SERVICE_PORT}
-      targetPort: chisel
-${SSH_SERVICE_NODE_PORT_LINE}
+    - name: ssh
+      port: 22
+      targetPort: ssh

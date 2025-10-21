@@ -4,9 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SCRIPT_DIR%/scripts}"
 CONFIG_DIR="${ROOT_DIR}/configs"
-REPORTS_DIR="${ROOT_DIR}/reports"
 
-mkdir -p "${CONFIG_DIR}" "${REPORTS_DIR}"
+mkdir -p "${CONFIG_DIR}"
 
 log_info() {
   printf '==> %s\n' "$*"
@@ -64,6 +63,11 @@ if [[ -z "${PYTHON_BIN}" ]]; then
   exit 1
 fi
 
+if ! command -v curl >/dev/null 2>&1; then
+  log_error "curl is required."
+  exit 1
+fi
+
 SSH_DIR="${HOME}/.ssh"
 mkdir -p "${SSH_DIR}"
 
@@ -71,13 +75,21 @@ SSH_CONFIG_PATH="${SSH_CONFIG_PATH:-${SSH_DIR}/config}"
 SSH_IDENTITY_PATH="${SSH_IDENTITY_PATH:-${CONFIG_DIR}/id-codex-ssh}"
 SSH_KNOWN_HOSTS_PATH="${SSH_KNOWN_HOSTS_PATH:-${CONFIG_DIR}/ssh-known_hosts}"
 SSH_INVENTORY_PATH="${SSH_INVENTORY_PATH:-${CONFIG_DIR}/ssh-hosts.json}"
-SSH_REPORT_PATH="${SSH_REPORT_PATH:-${REPORTS_DIR}/ssh-inventory.md}"
+# Optional inventory report path (leave empty to skip writing a file)
+SSH_REPORT_PATH="${SSH_REPORT_PATH:-}"
 SSH_BASTION_USER="${SSH_BASTION_USER:-codex}"
 SSH_PROXY_URL="${SSH_PROXY_URL:-}"
 SSH_PROXY_CONNECT_TIMEOUT="${SSH_PROXY_CONNECT_TIMEOUT:-20}"
 SSH_PROXY_IDLE_TIMEOUT="${SSH_PROXY_IDLE_TIMEOUT:-0}"
 SSH_PROXY_READ_TIMEOUT="${SSH_PROXY_READ_TIMEOUT:-0}"
 SSH_GENERATED_KEY_COMMENT="${SSH_GENERATED_KEY_COMMENT:-codex@workspace}"
+SSH_GW_USER="${SSH_GW_USER:-codex}"
+SSH_GW_TOKEN="${SSH_GW_TOKEN:-}"
+SSH_TUNNEL_LOCAL_PORT="${SSH_TUNNEL_LOCAL_PORT:-4022}"
+SSH_CHISEL_BIN="${SSH_CHISEL_BIN:-${ROOT_DIR}/bin/chisel}"
+SSH_CHISEL_VERSION="${SSH_CHISEL_VERSION:-1.9.1}"
+SSH_CHISEL_PID_FILE="${SSH_CHISEL_PID_FILE:-${CONFIG_DIR}/ssh-chisel.pid}"
+SSH_CHISEL_LOG_FILE="${SSH_CHISEL_LOG_FILE:-${CONFIG_DIR}/ssh-chisel.log}"
 
 parse_bastion_endpoint() {
   "${PYTHON_BIN}" <<'PY'
@@ -85,7 +97,10 @@ import os
 import sys
 from urllib.parse import urlparse
 
-endpoint = os.environ.get("SSH_BASTION_ENDPOINT", "").strip()
+endpoint = (
+    os.environ.get("SSH_GW_NODE", "").strip()
+    or os.environ.get("SSH_BASTION_ENDPOINT", "").strip()
+)
 host = os.environ.get("SSH_BASTION_HOST", "").strip()
 port = os.environ.get("SSH_BASTION_PORT", "").strip()
 
@@ -104,7 +119,10 @@ if endpoint:
 host = host.strip()
 port = port.strip()
 if not host:
-    sys.exit("SSH bastion host is not configured (set SSH_BASTION_ENDPOINT or SSH_BASTION_HOST/SSH_BASTION_PORT).")
+    sys.exit(
+        "SSH bastion host is not configured (set SSH_GW_NODE or SSH_BASTION_ENDPOINT, "
+        "or provide SSH_BASTION_HOST/SSH_BASTION_PORT)."
+    )
 
 if not port:
     port = "22"
@@ -122,6 +140,11 @@ fi
 BASTION_HOST="${bastion_info[0]}"
 BASTION_PORT="${bastion_info[1]}"
 
+if [[ -z "${SSH_GW_TOKEN}" ]]; then
+  log_error "SSH_GW_TOKEN is not set. Provide the token from deploy-ssh-bastion.sh output."
+  exit 1
+fi
+
 ensure_file_permissions() {
   local path="$1"
   local mode="$2"
@@ -136,6 +159,96 @@ write_private_key() {
   printf '%s\n' "${content}" >"${key_path}.tmp"
   chmod 600 "${key_path}.tmp"
   mv "${key_path}.tmp" "${key_path}"
+}
+
+ensure_chisel() {
+  if [[ -x "${SSH_CHISEL_BIN}" ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "${SSH_CHISEL_BIN}")"
+  local arch
+  case "$(uname -m)" in
+    x86_64|amd64)
+      arch=amd64
+      ;;
+    aarch64|arm64)
+      arch=arm64
+      ;;
+    *)
+      log_error "Unsupported architecture for chisel: $(uname -m)"
+      exit 1
+      ;;
+  esac
+  local url="https://github.com/jpillora/chisel/releases/download/v${SSH_CHISEL_VERSION}/chisel_${SSH_CHISEL_VERSION}_linux_${arch}.gz"
+  log_info "Downloading chisel ${SSH_CHISEL_VERSION} (${arch})"
+  curl -fsSL "${url}" -o "${SSH_CHISEL_BIN}.gz"
+  gunzip -f "${SSH_CHISEL_BIN}.gz"
+  chmod +x "${SSH_CHISEL_BIN}"
+}
+
+stop_chisel() {
+  if [[ -f "${SSH_CHISEL_PID_FILE}" ]]; then
+    local pid
+    pid="$(cat "${SSH_CHISEL_PID_FILE}" 2>/dev/null || true)"
+    if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
+      log_info "Stopping previous chisel tunnel (PID ${pid})"
+      kill "${pid}" >/dev/null 2>&1 || true
+      wait "${pid}" >/dev/null 2>&1 || true
+    fi
+    rm -f "${SSH_CHISEL_PID_FILE}"
+  fi
+}
+
+wait_for_local_port() {
+  local host="$1"
+  local port="$2"
+  python3 - <<'PY' "$host" "$port"
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+s = socket.socket()
+s.settimeout(0.5)
+try:
+    s.connect((host, port))
+except OSError:
+    sys.exit(1)
+else:
+    sys.exit(0)
+finally:
+    s.close()
+PY
+}
+
+start_chisel_bridge() {
+  ensure_chisel
+  stop_chisel
+  mkdir -p "${CONFIG_DIR}"
+  : >"${SSH_CHISEL_LOG_FILE}"
+  local target="https://${BASTION_HOST}:${BASTION_PORT}"
+  local -a cmd=("${SSH_CHISEL_BIN}" "client" "--keepalive=25s" "--auth" "${SSH_GW_USER}:${SSH_GW_TOKEN}")
+  if [[ -n "${SSH_PROXY_URL}" ]]; then
+    cmd+=("--proxy" "${SSH_PROXY_URL}")
+  fi
+  cmd+=("${target}" "L:127.0.0.1:${SSH_TUNNEL_LOCAL_PORT}:127.0.0.1:22")
+  log_info "Starting chisel tunnel to ${target} (local port ${SSH_TUNNEL_LOCAL_PORT})"
+  nohup "${cmd[@]}" >>"${SSH_CHISEL_LOG_FILE}" 2>&1 &
+  local pid=$!
+  echo "${pid}" >"${SSH_CHISEL_PID_FILE}"
+  for attempt in {1..20}; do
+    if kill -0 "${pid}" >/dev/null 2>&1 && wait_for_local_port 127.0.0.1 "${SSH_TUNNEL_LOCAL_PORT}"; then
+      return 0
+    fi
+    if ! kill -0 "${pid}" >/dev/null 2>&1; then
+      log_error "Chisel tunnel exited unexpectedly (see ${SSH_CHISEL_LOG_FILE})"
+      rm -f "${SSH_CHISEL_PID_FILE}"
+      return 1
+    fi
+    sleep 0.5
+  done
+  log_warn "Chisel tunnel did not become ready within timeout; continuing"
+  return 0
 }
 
 if [[ "${GENERATE_KEY}" == "1" ]]; then
@@ -161,6 +274,11 @@ fi
 
 ensure_file_permissions "${SSH_IDENTITY_PATH}" 600
 
+if ! start_chisel_bridge; then
+  log_error "Failed to establish chisel tunnel. See ${SSH_CHISEL_LOG_FILE}."
+  exit 1
+fi
+
 KNOWN_HOSTS_TMP="$(mktemp)"
 cleanup_tmp() {
   rm -f "${KNOWN_HOSTS_TMP}"
@@ -172,8 +290,8 @@ if [[ -f "${SSH_KNOWN_HOSTS_PATH}" ]]; then
 fi
 
 if command -v ssh-keyscan >/dev/null 2>&1; then
-  log_info "Refreshing bastion host key (${BASTION_HOST}:${BASTION_PORT})"
-  if ssh-keyscan -p "${BASTION_PORT}" -H "${BASTION_HOST}" >>"${KNOWN_HOSTS_TMP}" 2>/dev/null; then
+  log_info "Refreshing bastion host key via local tunnel (${SSH_TUNNEL_LOCAL_PORT})"
+  if ssh-keyscan -p "${SSH_TUNNEL_LOCAL_PORT}" -H 127.0.0.1 >>"${KNOWN_HOSTS_TMP}" 2>/dev/null; then
     true
   else
     log_warn "Failed to retrieve bastion host key via ssh-keyscan."
@@ -192,26 +310,15 @@ else
 fi
 
 build_bastion_block() {
-  local proxy_line=""
-  if [[ -n "${SSH_PROXY_URL}" ]]; then
-    proxy_line="    ProxyCommand /usr/bin/env python3 ${SCRIPT_DIR}/connect_via_proxy.py --proxy=${SSH_PROXY_URL} --destination-host %h --destination-port %p --connect-timeout ${SSH_PROXY_CONNECT_TIMEOUT}"
-    if [[ "${SSH_PROXY_IDLE_TIMEOUT}" != "0" ]]; then
-      proxy_line+=" --idle-timeout=${SSH_PROXY_IDLE_TIMEOUT}"
-    fi
-    if [[ "${SSH_PROXY_READ_TIMEOUT}" != "0" ]]; then
-      proxy_line+=" --read-timeout=${SSH_PROXY_READ_TIMEOUT}"
-    fi
-  fi
   cat <<EOF
 Host codex-ssh-bastion
-    HostName ${BASTION_HOST}
-    Port ${BASTION_PORT}
+    HostName 127.0.0.1
+    Port ${SSH_TUNNEL_LOCAL_PORT}
     User ${SSH_BASTION_USER}
     IdentityFile ${SSH_IDENTITY_PATH}
     IdentitiesOnly yes
     UserKnownHostsFile ${SSH_KNOWN_HOSTS_PATH}
     StrictHostKeyChecking yes
-${proxy_line}
 EOF
 }
 
@@ -295,7 +402,7 @@ else
   INVENTORY_STATUS="missing"
 fi
 
-"${PYTHON_BIN}" <<'PY' "${INVENTORY_STATUS}" "${SSH_INVENTORY_PATH}" "${SSH_IDENTITY_PATH}" "${SSH_KNOWN_HOSTS_PATH}" "${SUMMARY_FILE}" "${SCAN_FILE}" "${CONFIG_FILE}" "${SSH_HOST_LABEL_OVERRIDES:-}" 
+"${PYTHON_BIN}" <<'PY' "${INVENTORY_STATUS}" "${SSH_INVENTORY_PATH}" "${SSH_IDENTITY_PATH}" "${SSH_KNOWN_HOSTS_PATH}" "${SUMMARY_FILE}" "${SCAN_FILE}" "${CONFIG_FILE}" "${SSH_HOST_LABEL_OVERRIDES:-}" "${SSH_GW_NODE}" "${SSH_TUNNEL_LOCAL_PORT}" "${SSH_CHISEL_PID_FILE}" "${SSH_CHISEL_LOG_FILE}" 
 import json
 import sys
 from pathlib import Path
@@ -308,6 +415,10 @@ summary_path = Path(sys.argv[5])
 scan_path = Path(sys.argv[6])
 config_path = Path(sys.argv[7])
 label_overrides_raw = sys.argv[8]
+gateway_node = sys.argv[9]
+local_port = sys.argv[10]
+chisel_pid_path = Path(sys.argv[11])
+chisel_log_path = Path(sys.argv[12])
 
 label_overrides = {}
 for item in label_overrides_raw.split(','):
@@ -452,6 +563,19 @@ lines.extend([
     "",
     "ℹ️ Переименовать цель: `codex-hostctl rename <old> <new>`.",
 ])
+lines.extend([
+    "",
+    "### Using the SSH bastion",
+    "",
+    "1. Run `./scripts/setup-codex-workspace.sh` whenever the workspace starts (also add it to the Maintenance script so cached restores keep the tunnel alive).",
+    "2. Connect to any listed alias with `ssh <alias>` — the managed SSH config injects the ProxyJump chain automatically.",
+    "3. After teaching the bastion new routes, rerun the helper so the inventory and tunnel metadata stay fresh.",
+])
+if gateway_node:
+    lines.append("")
+    lines.append(f"Туннель: chisel → https://{gateway_node} → локальный порт {local_port}")
+    lines.append(f"PID: {str(chisel_pid_path)}")
+    lines.append(f"Лог: {str(chisel_log_path)}")
 summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 config_lines = []
@@ -523,9 +647,15 @@ fi
 
 SUMMARY_CONTENT="$(<"${SUMMARY_FILE}")"
 
-printf '%s' "${SUMMARY_CONTENT}" >"${SSH_REPORT_PATH}" 2>/dev/null || true
+if [[ -n "${SSH_REPORT_PATH:-}" ]]; then
+  printf '%s' "${SUMMARY_CONTENT}" >"${SSH_REPORT_PATH}" 2>/dev/null || true
+fi
 
-mapfile -t agents_files < <(find "${ROOT_DIR}" -name AGENTS.md -type f -print)
+AGENTS_SEARCH_PATHS=("${ROOT_DIR}")
+if [[ -d /workspace ]]; then
+  AGENTS_SEARCH_PATHS+=("/workspace")
+fi
+mapfile -t agents_files < <(find "${AGENTS_SEARCH_PATHS[@]}" -name AGENTS.md -type f -print 2>/dev/null | sort -u)
 if [[ ${#agents_files[@]} -gt 0 ]]; then
   SUMMARY_TMP="$(mktemp)"
   printf '%s' "${SUMMARY_CONTENT}" >"${SUMMARY_TMP}"

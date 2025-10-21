@@ -2,120 +2,148 @@
 
 *English documentation is available in [README.md](README.md).*
 
-Репозиторий разворачивает SSH-бастион в кластере Kubernetes и включает готовый контейнерный образ с учётом требований Codex.
+Репозиторий разворачивает SSH-бастион внутри доверенного кластера Kubernetes и предоставляет образ с телеметрией, который запоминает все цепочки `ProxyJump`. Один скрипт на стороне администратора создаёт/обновляет ресурсы и выводит настройки для Codex; второй скрипт внутри workspace устанавливает ключ и синхронизирует инвентарь.
 
-## 1. Состав
-- **Образ** – каталог [`images/ssh-bastion/`](images/ssh-bastion/) содержит Dockerfile, entrypoint, CLI `codex-hostctl` и обёртки `ssh/scp/sftp`.
-- **Манифесты** – шаблоны в [`manifests/ssh-bastion/`](manifests/ssh-bastion/) описывают Namespace, PVC, ConfigMap, Deployment и Service. Они параметризуются скриптом `deploy-ssh-bastion.sh`.
-- **Хранилище** – по умолчанию используется PVC (`/var/lib/codex-ssh`), который хранит инвентарь подключений и пользовательские метки. При необходимости PVC можно заменить на директорию узла (`hostPath`).
-- **Скрипты** – [`scripts/deploy-ssh-bastion.sh`](scripts/deploy-ssh-bastion.sh) применяет манифесты, при необходимости обновляет секрет `authorized_keys` и выводит подсказки по проверке.
+---
 
-## 2. Поведение контейнера
-Entry-point выполняет:
-1. Создание системного пользователя `codex`, подготовку директории `/var/lib/codex-ssh` с правами `0700` и файлов `inventory.json`, `labels.json`.
-2. Копирование ключей из секрета Kubernetes в `~codex/.ssh/authorized_keys` (права `600`).
-3. Перенос оригинальных бинарей `ssh`, `scp`, `sftp` в `/opt/codex-ssh/originals/` и замена их обёртками, которые перед запуском клиента записывают параметры подключения в инвентарь.
-4. Применение сниппета `sshd_config` из ConfigMap, генерация host-ключей (`ssh-keygen -A`) и обновление MOTD через `codex-hostctl motd`.
-5. Запуск OpenSSH (`/usr/sbin/sshd -D -e`). В конфигурации отключены парольная аутентификация, root-доступ и X11; разрешён только пользователь `codex` и `internal-sftp`.
+## 1. Состав репозитория
 
-### 2.1 CLI `codex-hostctl`
-- `codex-hostctl record` – служебная команда, вызываемая обёртками для фиксации подключения.
-- `codex-hostctl list` – табличный список (id, имя, цель, порт, цепочка jump, fingerprint, `last_seen`).
-- `codex-hostctl export` – JSON для синхронизации с рабочим пространством.
-- `codex-hostctl rename <id> <name>` – присвоение читаемого имени (пустое значение удаляет метку).
-- `codex-hostctl motd` – текст для `/etc/motd` (используется entry-point’ом).
+- **Исходники образа** – [`images/ssh-bastion/`](images/ssh-bastion/) включает Dockerfile, entrypoint, обёртки `ssh/scp/sftp` и CLI `codex-hostctl`.
+- **Шаблоны манифестов** – [`manifests/ssh-bastion/`](manifests/ssh-bastion/) содержит Namespace, ConfigMap, Deployment и Service (рендерятся через `envsubst`).
+- **Скрипт администратора** – [`scripts/deploy-ssh-bastion.sh`](scripts/deploy-ssh-bastion.sh) по желанию собирает/публикует образ, применяет манифесты, ожидает rollout и печатает итоговые значения `SSH_GW_NODE` и `SSH_KEY`.
+- **Скрипт внутри Codex** – [`scripts/setup-codex-workspace.sh`](scripts/setup-codex-workspace.sh) размещает ключ, обновляет `~/.ssh/config`, поднимает HTTPS-туннель и актуализирует инструкции в `AGENTS.md`.
 
-## 3. Развёртывание
-```bash
-SSH_NAMESPACE=codex-ssh \
-SSH_SERVICE_NODE_PORT=32222 \
-SSH_IMAGE_REGISTRY=ghcr.io/gordeytsy \
-SSH_BASTION_IMAGE=codex-ssh-bastion:latest \
-SSH_AUTHORIZED_SECRET=ssh-authorized-keys \
-scripts/deploy-ssh-bastion.sh
-```
+---
 
-Скрипт создаёт временные файлы, прогоняет их через `envsubst` и применяет `kubectl apply`. Если секрет `authorized_keys` отсутствует, скрипт сгенерирует новую пару ключей `ed25519` (тип можно изменить) и выведет приватный ключ, который нужно сохранить в секрет Codex. При наличии `SSH_AUTHORIZED_KEYS_FILE` секрет перегенерируется из указанного файла вместо генерации ключа.
+## 2. Развёртывание на хосте
 
-### 3.1 Переменные окружения
-| Переменная | Значение по умолчанию | Описание |
-| --- | --- | --- |
-| `SSH_NAMESPACE` | `codex-ssh` | Namespace для всех объектов. |
-| `SSH_DEPLOYMENT_NAME` | `ssh-bastion` | Имя Deployment. |
-| `SSH_SERVICE_NAME` | `ssh-bastion` | Имя Service. |
-| `SSH_SERVICE_TYPE` | `NodePort` | Тип сервиса (`NodePort`, `LoadBalancer`, `ClusterIP`). |
-| `SSH_SERVICE_NODE_PORT` | `32222` | Фиксированный NodePort; используется только при `SSH_SERVICE_TYPE=NodePort`. |
-| `SSH_NODE_NAME` | — | Привязка пода к конкретному узлу. Оставьте пустым, чтобы полагаться на планировщик. |
-| `SSH_PVC_NAME` | `codex-ssh-data` | Имя PersistentVolumeClaim. |
-| `SSH_PVC_SIZE` | `1Gi` | Запрашиваемый объём диска. |
-| `SSH_STORAGE_CLASS` | — | StorageClass. Оставьте пустым для значения по умолчанию. |
-| `SSH_STORAGE_TYPE` | `auto` | Тип хранилища (`auto`, `pvc` или `hostpath`). |
-| `SSH_HOSTPATH_PATH` | — | Путь на узле для `hostPath` (обязателен, когда выбран hostPath). |
-| `SSH_CONFIGMAP_NAME` | `ssh-bastion-config` | Имя ConfigMap с MOTD и `sshd_config`. |
-| `SSH_AUTHORIZED_SECRET` | `ssh-authorized-keys` | Секрет с публичными ключами. |
-| `SSH_BASTION_IMAGE` | `codex-ssh-bastion:latest` | Имя и тег образа без префикса реестра. |
-| `SSH_IMAGE_REGISTRY` | — | Префикс реестра (`registry.example.com/team`). |
-| `SSH_MOTD_CONTENT` | `Codex SSH bastion\nИспользуйте codex-hostctl list, чтобы увидеть найденные цели.` | Базовое сообщение MOTD. |
-| `SSH_AUTHORIZED_KEYS_FILE` | — | Путь до `authorized_keys`; при указании секрет обновится автоматически. |
-| `SSH_GENERATE_WORKSPACE_KEY` | `auto` | Управление генерацией ключа для Codex (`auto`, `true`, `false`). |
-| `SSH_WORKSPACE_KEY_TYPE` | `ed25519` | Тип ключа при генерации (`ed25519`, `rsa`, ...). |
-| `SSH_WORKSPACE_KEY_COMMENT` | `codex@workspace` | Комментарий, добавляемый к сгенерированному ключу. |
+Требуется `kubectl`, `envsubst`, а при сборке/публикации образа – `docker`.
 
-Если выбран hostPath (явно через `SSH_STORAGE_TYPE=hostpath` или неявно при `SSH_STORAGE_TYPE=auto` и заданном `SSH_HOSTPATH_PATH`),
-скрипт пропускает создание PVC и монтирует указанную директорию узла напрямую.
+1. Настройте переменные (см. [.env.host.example](.env.host.example)):
+   - `SSH_PUBLIC_HOST` – внешний адрес, доступный из Codex (например, `<keen-dns-domain>` с проброшенным NodePort).
+   - `SSH_SERVICE_NODE_PORT` – порт узла, который пробрасывает KeenDNS/роутер.
+   - `SSH_STORAGE_TYPE` и `SSH_HOSTPATH_PATH` – выберите `hostpath`, если нужно хранить данные на конкретном узле (`/srv/codex-ssh` и т.п.).
+2. Выполните скрипт:
 
-## 4. Обновление `authorized_keys`
-1. По умолчанию скрипт развёртывания создаёт новую пару ключей, если секрет `authorized_keys` отсутствует, и выводит приватный ключ для секрета Codex (`SSH_KEY`).
-2. Чтобы управлять секретом вручную, подготовьте файл с публичными ключами.
-3. Выполните:
    ```bash
-   kubectl -n ${SSH_NAMESPACE:-codex-ssh} create secret generic ${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys} \
-     --from-file=authorized_keys=./authorized_keys --dry-run=client -o yaml | kubectl apply -f -
+   set -a
+   source .env.host.example
+   set +a
+   scripts/deploy-ssh-bastion.sh
    ```
-4. При необходимости перезапустите Deployment (`kubectl rollout restart`). Entry-point проверит наличие и права файла; сообщения об ошибках появятся в `kubectl logs`.
 
-## 5. Инвентарь и переименования
-- `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl list`
-- `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl rename srv-01:22 prod-srv-01`
-- `kubectl exec deploy/${SSH_DEPLOYMENT_NAME} -- codex-hostctl export > inventory.json`
+   По завершении будет выведено:
 
-Обёртки `ssh`, `scp`, `sftp` регистрируют подключения автоматически, анализируя параметры `-J`, `-p/-P`, `-o ProxyJump`. Fingerprint заполняется через `ssh-keyscan` (таймаут 5 секунд). Все изменения пишутся в PVC и сохраняются между рестартами.
+   ```text
+   SSH_GW_NODE=<keen-dns-domain>:443
+   SSH_GW_USER=codex
+   SSH_GW_TOKEN=<сгенерированный-токен>
+   SSH_KEY=-----BEGIN OPENSSH PRIVATE KEY-----…
+   ```
 
-## 6. Безопасность
-- Включён только пользователь `codex`; парольная аутентификация отключена.
-- `AuthorizedKeysFile` указывает на файл из секрета; права корректируются entry-point’ом.
-- Проброшены только 22-й порт контейнера и NodePort/LoadBalancer сервиса.
-- MOTD напоминает об экспортных командах и о `codex-hostctl rename`.
+   Сохраните эти строки — `SSH_GW_NODE`/`SSH_GW_USER`/`SSH_GW_TOKEN` станут переменными в Codex, а `SSH_KEY` — секретом. KeenDNS слушает порт 443, поэтому Codex, требующий TLS-friendly `CONNECT`, сможет дотянуться до бастиона. Прямое `ssh codex@<keen-dns-domain>:443` работать не будет — требуется HTTPS-тоннель.
 
-## 7. Интеграция с Codex Workspace
-- Храните приватный ключ в секрете Codex (`SSH_KEY`), публичный ключ – в Kubernetes-секрете `authorized_keys`.
-- Рабочее пространство может синхронизировать список целей с помощью `codex-hostctl export` (через `kubectl exec`).
-- Для пользовательских меток используйте `codex-hostctl rename`; их значение сохраняется в `labels.json`.
+3. Проверьте состояние:
 
-## 8. Сборка образа
-После обновления исходников соберите образ:
+   ```bash
+   kubectl -n codex-ssh get pods -o wide
+   kubectl -n codex-ssh get svc ssh-bastion -o wide
+   curl -i http://<node-ip>:32222   # chisel вернёт HTTP 404 — значит NodePort виден
+   kubectl -n codex-ssh port-forward service/ssh-bastion-internal 2222:22 &
+   ssh -p 2222 codex@127.0.0.1      # по завершении остановите port-forward (Ctrl+C)
+   ```
+
+   При успешном подключении MOTD покажет известные цели. Если контейнер Codex восстановился из кеша, запустите помощник ещё раз вручную, если он не добавлен в Maintenance script.
+
+### 3.1 Альтернативные варианты HTTPS
+
+- Если в кластере доступен `LoadBalancer`, задайте `SSH_SERVICE_TYPE=LoadBalancer`, а также `SSH_PUBLIC_HOST`/`SSH_PUBLIC_PORT` с фактическим внешним адресом.
+- Либо поднимите Ingress, выдайте ему TLS-сертификат и установите `SSH_PUBLIC_HOST=<ingress-host>` (при необходимости измените `SSH_PUBLIC_SCHEME`).
+
+Сценарий в Codex остаётся прежним: `setup-codex-workspace.sh` поднимает chisel-тоннель до указанного HTTPS-адреса.
+
+---
+
+## 3. Настройка Codex workspace
+
+1. В **Settings → Variables** добавьте:
+   - `SSH_GW_NODE=<keen-dns-domain>:443` (порт 443 проходит через корпоративный прокси, который разрешает только TLS-тоннели).
+   - `SSH_GW_USER=codex`
+   - `SSH_GW_TOKEN=<токен из вывода скрипта>`
+2. В **Settings → Secrets** добавьте `SSH_KEY=<приватный ключ из вывода скрипта>`.
+3. Внутри контейнера выполните:
+
+   ```bash
+   	export PROJECT_PATH="$(pwd)"
+   	cd /workspace || true
+   	if [ ! -d codex-with-ssh ]; then
+   	  git clone https://github.com/GordeyTsy/codex-with-ssh.git
+   	fi
+   	cd codex-with-ssh
+   	./scripts/setup-codex-workspace.sh
+   	cd "$PROJECT_PATH"
+   ```
+
+   Помощник положит ключ в `configs/id-codex-ssh`, запустит фоновый HTTPS-туннель (`chisel`) на `127.0.0.1:${SSH_TUNNEL_LOCAL_PORT:-4022}` (PID хранится в `configs/ssh-chisel.pid`, лог — в `configs/ssh-chisel.log`), обновит `~/.ssh/config`, скачает инвентарь и добавит инструкцию в найденные `AGENTS.md`.
+
+4. Для долгоживущих окружений поместите ту же последовательность в **Maintenance script**, чтобы конфигурация обновлялась после «пробуждения» контейнера.
+
+---
+
+## 4. Настраиваемые переменные
+
+| Переменная | Назначение | Значение по умолчанию |
+| --- | --- | --- |
+| `SSH_NAMESPACE` | Namespace для всех объектов. | `codex-ssh` |
+| `SSH_DEPLOYMENT_NAME` | Имя Deployment. | `ssh-bastion` |
+| `SSH_SERVICE_NAME` | Имя Service. | `ssh-bastion` |
+| `SSH_SERVICE_TYPE` | Режим экспонирования (`NodePort`/`LoadBalancer`/`ClusterIP`). | `NodePort` |
+| `SSH_SERVICE_PORT` | Порт сервиса, который слушает chisel. | `443` |
+| `SSH_SERVICE_NODE_PORT` | NodePort на узлах (используется при `NodePort`). | `32222` |
+| `SSH_PUBLIC_HOST` | Внешний DNS (KeenDNS и т.п.), который смотрит на NodePort. | — |
+| `SSH_PUBLIC_PORT` | Порт, опубликованный во внешнем DNS/прокси. | `443` |
+| `SSH_PUBLIC_SCHEME` | Схема, которую нужно использовать в URL. | `https` |
+| `SSH_TUNNEL_PORT` | Внутренний порт, который обслуживает chisel. | `8080` |
+| `SSH_TUNNEL_SECRET_NAME` | Название секрета с `user:token`. | `ssh-bastion-tunnel` |
+| `SSH_TUNNEL_USER` | Имя пользователя туннеля. | `codex` |
+| `SSH_TUNNEL_TOKEN` | Фиксированный токен (пусто — сгенерировать автоматически). | — |
+| `SSH_STORAGE_TYPE` | Тип хранилища (`auto`/`pvc`/`hostpath`). | `auto` |
+| `SSH_HOSTPATH_PATH` | Каталог на узле (только для `hostpath`). | — |
+| `SSH_IMAGE_REGISTRY` | Реестр, куда публикуется образ. | — |
+| `SSH_BUILD_IMAGE` / `SSH_PUSH_IMAGE` | Управляют локальной сборкой/публикацией образа. | `auto` / зависит от реестра |
+| `SSH_GENERATE_WORKSPACE_KEY` | Генерация `authorized_keys`, если секрет отсутствует. | `auto` |
+| `SSH_MOTD_CONTENT` | Статический заголовок MOTD. | Текст по умолчанию |
+
+## 5. Что делает бастион
+
+- Обёртки `ssh/scp/sftp` перехватывают параметры `ProxyJump`, строят цепочку прыжков и записывают данные в `/var/lib/codex-ssh/inventory.json`.
+- MOTD выводит все известные цели в формате `alias: user@host`; новые подключения автоматически пополняют список.
+- Для ручного обслуживания внутри кластера можно использовать сервис `ssh-bastion-internal.codex-ssh.svc.cluster.local:22` (например, развернуть debug-под и подключиться командой `ssh codex@ssh-bastion-internal.codex-ssh.svc.cluster.local`).
+- CLI `codex-hostctl` внутри пода:
+  - `codex-hostctl list` – табличный список.
+  - `codex-hostctl export` – JSON, который читает рабочий скрипт.
+  - `codex-hostctl rename <id> <имя>` – переименование (например, `KeeneticOS` → `router`).
+  - `codex-hostctl motd` – генерация баннера.
+- Инвентарь хранится на PVC/hostPath, поэтому данные сохраняются между рестартами. Для нескольких реплик используйте общее хранилище (PVC), иначе список будет локальным для каждого пода.
+
+---
+
+## 6. Обслуживание
+
+- **Ротация ключей** – перезапустите `deploy-ssh-bastion.sh`. При `SSH_GENERATE_WORKSPACE_KEY=auto` новая пара создаётся, если секрет отсутствует. Чтобы использовать свой ключ, перед запуском задайте `SSH_AUTHORIZED_KEYS_FILE=<путь>`.
+- **Ротация токена туннеля** – установите `SSH_TUNNEL_TOKEN=<новый-токен>` перед запуском скрипта; иначе будет использован существующий секрет, и его значение снова появится в выводе.
+- **Обновление образа** – включите `SSH_BUILD_IMAGE=true` или задайте `SSH_IMAGE_REGISTRY=<registry>` для публикации. Скрипт сам перезапускает Deployment.
+- **Диагностика** – `kubectl -n codex-ssh logs deploy/ssh-bastion` показывает логи; проверка готовности — простой TCP check на 22 порт.
+
+---
+
+## 7. Удаление
+
 ```bash
-docker build -t "${SSH_IMAGE_REGISTRY:-<public-registry>}/codex-ssh-bastion:latest" images/ssh-bastion
-```
-и опубликуйте его в вашем реестре, прежде чем обновлять Deployment.
-
-## 9. Остановка и удаление
-Временно остановить бастион (оставив ресурсы) можно командой:
-```bash
-kubectl -n ${SSH_NAMESPACE:-codex-ssh} scale deployment/${SSH_DEPLOYMENT_NAME:-ssh-bastion} --replicas=0
+kubectl -n codex-ssh delete deployment/ssh-bastion service/ssh-bastion \
+  configmap/ssh-bastion-config secret/ssh-authorized-keys
+kubectl -n codex-ssh delete pvc/codex-ssh-data   # пропустите для hostPath
+# Необязательно: kubectl delete namespace codex-ssh
 ```
 
-Полное удаление (подберите команды под тип хранилища):
-```bash
-kubectl -n ${SSH_NAMESPACE:-codex-ssh} delete deployment/${SSH_DEPLOYMENT_NAME:-ssh-bastion} \
-  service/${SSH_SERVICE_NAME:-ssh-bastion} \
-  configmap/${SSH_CONFIGMAP_NAME:-ssh-bastion-config} \
-  secret/${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys}
-
-# Удалите PVC, если он использовался (при hostPath пропустите)
-kubectl -n ${SSH_NAMESPACE:-codex-ssh} delete pvc/${SSH_PVC_NAME:-codex-ssh-data}
-
-# Namespace удаляйте только если он выделен под бастион
-kubectl delete namespace ${SSH_NAMESPACE:-codex-ssh}
-```
-Если используется hostPath, удалите директорию на узле вручную, если она больше не нужна.
+При использовании hostPath удалите директорию на узле вручную.

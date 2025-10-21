@@ -19,7 +19,7 @@ ${SSH_NODE_PLACEMENT_BLOCK}
       containers:
         - name: codex-ssh-bastion
           image: ${SSH_BASTION_IMAGE_REF}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 22
               name: ssh
@@ -53,16 +53,35 @@ ${SSH_NODE_PLACEMENT_BLOCK}
           readinessProbe:
             exec:
               command:
-                - /bin/sh
+                - /bin/bash
                 - -c
-                - 'exec 3<>/dev/tcp/127.0.0.1/22 && echo -e "\x53\x48\x49" >&3 && sleep 1 && head -c 3 <&3'
+                - 'nc -z -w 2 127.0.0.1 22'
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
           livenessProbe:
             tcpSocket:
               port: 22
             initialDelaySeconds: 10
             periodSeconds: 20
+        - name: chisel-gateway
+          image: jpillora/chisel:1.9.1
+          args:
+            - server
+            - --port=${SSH_CHISEL_PORT}
+            - --auth=$(SSH_CHISEL_AUTH)
+            - --keepalive=25s
+          env:
+            - name: SSH_CHISEL_PORT
+              value: "${SSH_CHISEL_PORT}"
+            - name: SSH_CHISEL_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: ${SSH_TUNNEL_SECRET_NAME}
+                  key: auth
+          ports:
+            - containerPort: ${SSH_CHISEL_PORT}
+              name: chisel
       volumes:
         - name: authorized-keys
           secret:

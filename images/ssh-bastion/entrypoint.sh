@@ -57,6 +57,13 @@ if [ -d "${CONFIG_DIR}" ]; then
   fi
 fi
 
+# Debian ships a default 'Subsystem sftp' directive; drop it so our snippet can
+# redefine the subsystem without triggering duplicate errors.
+if grep -qE '^[[:space:]]*Subsystem[[:space:]]+sftp' /etc/ssh/sshd_config; then
+  log "Removing default sftp subsystem from sshd_config"
+  sed -i -E '/^[[:space:]]*Subsystem[[:space:]]+sftp/d' /etc/ssh/sshd_config
+fi
+
 if [ -d "${MOTD_DIR}" ]; then
   chown ${CODex_USER}:${CODex_USER} "${MOTD_DIR}"
 fi
@@ -92,6 +99,8 @@ if command -v codex-hostctl >/dev/null 2>&1; then
   mv /etc/motd.new /etc/motd
   chmod 644 /etc/motd
 fi
+
+install -d -m 755 /run/sshd
 
 log "Starting sshd"
 exec /usr/sbin/sshd -D -e
