@@ -18,6 +18,7 @@ class Invocation:
     binary: str
     args: Sequence[str]
     target: str | None
+    username: str | None
     port: int
     jump_chain: List[str]
 
@@ -36,13 +37,19 @@ def _extract_target(spec: str) -> str:
     return spec
 
 
+def _extract_username(spec: str | None) -> str | None:
+    if not spec or "@" not in spec:
+        return None
+    return spec.split("@", 1)[0]
+
+
 def _parse_options(argv: Sequence[str], *, mode: str) -> Invocation:
     args: List[str] = []
     jump_chain: List[str] = []
     port = 22
     target: str | None = None
-    it = iter(range(len(argv)))
     idx = 0
+    raw_target: str | None = None
     while idx < len(argv):
         arg = argv[idx]
         args.append(arg)
@@ -97,6 +104,7 @@ def _parse_options(argv: Sequence[str], *, mode: str) -> Invocation:
         elif not arg.startswith("-") and target is None:
             # first positional target
             target = arg
+            raw_target = arg
             if mode != "scp":
                 break
         idx += 1
@@ -104,9 +112,18 @@ def _parse_options(argv: Sequence[str], *, mode: str) -> Invocation:
         for arg in argv:
             if ":" in arg:
                 target = arg
+                raw_target = arg
                 break
     real_target = _extract_target(target) if target else None
-    return Invocation(binary=mode, args=argv, target=real_target, port=port, jump_chain=jump_chain)
+    username = _extract_username(raw_target)
+    return Invocation(
+        binary=mode,
+        args=argv,
+        target=real_target,
+        username=username,
+        port=port,
+        jump_chain=jump_chain,
+    )
 
 
 def _collect_fingerprint(target: str, port: int) -> str:
@@ -143,6 +160,8 @@ def _record(invocation: Invocation) -> None:
         cmd.extend(["--jump-chain", *invocation.jump_chain])
     if fingerprint:
         cmd.extend(["--fingerprint", fingerprint])
+    if invocation.username:
+        cmd.extend(["--user", invocation.username])
     try:
         subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except FileNotFoundError:

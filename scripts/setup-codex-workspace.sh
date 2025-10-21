@@ -91,6 +91,10 @@ SSH_CHISEL_VERSION="${SSH_CHISEL_VERSION:-1.9.1}"
 SSH_CHISEL_PID_FILE="${SSH_CHISEL_PID_FILE:-${CONFIG_DIR}/ssh-chisel.pid}"
 SSH_CHISEL_LOG_FILE="${SSH_CHISEL_LOG_FILE:-${CONFIG_DIR}/ssh-chisel.log}"
 SSH_CHISEL_LOG_LINES="${SSH_CHISEL_LOG_LINES:-200}"
+SSH_KNOWN_HOSTS_REFRESH_RETRIES="${SSH_KNOWN_HOSTS_REFRESH_RETRIES:-10}"
+SSH_KNOWN_HOSTS_REFRESH_DELAY="${SSH_KNOWN_HOSTS_REFRESH_DELAY:-1}"
+SSH_INVENTORY_RETRIES="${SSH_INVENTORY_RETRIES:-5}"
+SSH_INVENTORY_RETRY_DELAY="${SSH_INVENTORY_RETRY_DELAY:-3}"
 
 parse_bastion_endpoint() {
   "${PYTHON_BIN}" - <<'PY'
@@ -301,9 +305,21 @@ fi
 
 if command -v ssh-keyscan >/dev/null 2>&1; then
   log_info "Refreshing bastion host key via local tunnel (${SSH_TUNNEL_LOCAL_PORT})"
-  if ssh-keyscan -p "${SSH_TUNNEL_LOCAL_PORT}" -H 127.0.0.1 >>"${KNOWN_HOSTS_TMP}" 2>/dev/null; then
-    true
-  else
+  host_scan_success=0
+  for attempt in $(seq 1 "${SSH_KNOWN_HOSTS_REFRESH_RETRIES}"); do
+    scan_tmp="$(mktemp)"
+    if ssh-keyscan -p "${SSH_TUNNEL_LOCAL_PORT}" -H 127.0.0.1 >"${scan_tmp}" 2>/dev/null; then
+      cat "${scan_tmp}" >>"${KNOWN_HOSTS_TMP}" 2>/dev/null || true
+      host_scan_success=1
+      rm -f "${scan_tmp}"
+      break
+    fi
+    rm -f "${scan_tmp}"
+    if [[ "${attempt}" -lt "${SSH_KNOWN_HOSTS_REFRESH_RETRIES}" ]]; then
+      sleep "${SSH_KNOWN_HOSTS_REFRESH_DELAY}"
+    fi
+  done
+  if [[ "${host_scan_success}" -ne 1 ]]; then
     log_warn "Failed to retrieve bastion host key via ssh-keyscan."
   fi
 else
@@ -387,11 +403,22 @@ fetch_inventory() {
     -- "codex-hostctl" "export" "--format" "json"
   )
   log_info "Fetching SSH inventory from bastion"
-  if ssh "${ssh_opts[@]}" >"${output_path}.tmp"; then
-    mv "${output_path}.tmp" "${output_path}"
+  local attempt success=0
+  for attempt in $(seq 1 "${SSH_INVENTORY_RETRIES}"); do
+    if ssh "${ssh_opts[@]}" >"${output_path}.tmp"; then
+      mv "${output_path}.tmp" "${output_path}"
+      success=1
+      break
+    fi
+    rm -f "${output_path}.tmp"
+    if [[ "${attempt}" -lt "${SSH_INVENTORY_RETRIES}" ]]; then
+      log_warn "Inventory fetch attempt ${attempt} failed; retrying in ${SSH_INVENTORY_RETRY_DELAY}s."
+      sleep "${SSH_INVENTORY_RETRY_DELAY}"
+    fi
+  done
+  if [[ "${success}" -eq 1 ]]; then
     return 0
   fi
-  rm -f "${output_path}.tmp"
   return 1
 }
 

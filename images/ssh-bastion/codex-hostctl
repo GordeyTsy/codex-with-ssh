@@ -16,6 +16,10 @@ DATA_DIR = pathlib.Path(os.environ.get("DATA_DIR", "/var/lib/codex-ssh"))
 INVENTORY_FILE = DATA_DIR / "inventory.json"
 LABELS_FILE = DATA_DIR / "labels.json"
 LOCK_FILE = DATA_DIR / ".inventory.lock"
+_motd_env = os.environ.get("CODEX_SSH_MOTD_PATH", "/etc/motd")
+MOTD_PATH = pathlib.Path(_motd_env) if _motd_env else None
+_motd_base_env = os.environ.get("CODEX_SSH_MOTD_BASE", "/etc/motd.base")
+MOTD_BASE_PATH = pathlib.Path(_motd_base_env) if _motd_base_env else None
 
 
 def _load_json(path: pathlib.Path, default: Any) -> Any:
@@ -67,6 +71,19 @@ def _normalize_id(target: str, port: int) -> str:
     return f"{safe_target}:{port}"
 
 
+def _split_login(login: str) -> tuple[str, str]:
+    if "@" in login:
+        user, host = login.split("@", 1)
+    else:
+        user, host = "", login
+    host = host.strip()
+    if host.startswith("[") and "]" in host:
+        host = host[1 : host.index("]")]
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    return user.strip(), host.strip()
+
+
 def _find_record(store: InventoryStore, record_id: str) -> Dict[str, Any] | None:
     for item in store.inventory:
         if item.get("id") == record_id:
@@ -85,6 +102,7 @@ def cmd_record(args: argparse.Namespace) -> int:
             "port": args.port,
             "jump_chain": args.jump_chain,
             "fingerprint": args.fingerprint or "",
+            "user": args.user or "",
             "last_seen": now,
         }
         if entry is None:
@@ -92,7 +110,25 @@ def cmd_record(args: argparse.Namespace) -> int:
         else:
             entry.update(payload)
         store.save()
+        _refresh_motd(store)
     return 0
+
+
+def cmd_learn(args: argparse.Namespace) -> int:
+    user, host = _split_login(args.login)
+    if not host:
+        print("Не удалось определить хост из login.", file=sys.stderr)
+        return 1
+    jump_chain = [hop for hop in (args.via or []) if hop]
+    record_args = argparse.Namespace(
+        id=args.id,
+        target=host,
+        port=args.port,
+        jump_chain=jump_chain,
+        fingerprint="",
+        user=user,
+    )
+    return cmd_record(record_args)
 
 
 def _iter_sorted(store: InventoryStore) -> Iterable[Dict[str, Any]]:
@@ -102,15 +138,23 @@ def _iter_sorted(store: InventoryStore) -> Iterable[Dict[str, Any]]:
 def cmd_list(args: argparse.Namespace) -> int:
     with InventoryStore() as store:
         rows: List[List[str]] = []
-        headers = ["ID", "NAME", "TARGET", "PORT", "JUMP", "FINGERPRINT", "LAST_SEEN"]
+        headers = ["ID", "NAME", "LOGIN", "TARGET", "PORT", "JUMP", "FINGERPRINT", "LAST_SEEN"]
         for entry in _iter_sorted(store):
             record_id = entry["id"]
-            name = store.labels.get(record_id, record_id)
+            user = entry.get("user", "")
+            target = entry.get("target", "")
+            login = f"{user}@{target}" if user else target
+            label = store.labels.get(record_id)
+            if label:
+                name = label
+            else:
+                name = login or record_id
             jump_chain = " -> ".join(entry.get("jump_chain", [])) or "direct"
             rows.append([
                 record_id,
                 name,
-                entry.get("target", ""),
+                login,
+                target,
                 str(entry.get("port", "")),
                 jump_chain,
                 entry.get("fingerprint", ""),
@@ -139,6 +183,7 @@ def cmd_export(args: argparse.Namespace) -> int:
                     "target": entry.get("target"),
                     "port": entry.get("port"),
                     "jump_chain": entry.get("jump_chain", []),
+                    "user": entry.get("user", ""),
                     "fingerprint": entry.get("fingerprint", ""),
                     "last_seen": entry.get("last_seen", ""),
                 }
@@ -163,28 +208,72 @@ def cmd_rename(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_base_message(header: str = "") -> str:
+    if header:
+        return header
+    env_message = os.environ.get("CODEX_SSH_MOTD")
+    if env_message:
+        return env_message.rstrip("\n")
+    if MOTD_BASE_PATH and MOTD_BASE_PATH.exists():
+        try:
+            return MOTD_BASE_PATH.read_text(encoding="utf-8").rstrip("\n")
+        except Exception:
+            pass
+    return "Codex SSH bastion"
+
+
+def _render_motd(store: InventoryStore, header: str = "") -> str:
+    lines: List[str] = []
+    lines.append(_load_base_message(header))
+    if store.inventory:
+        lines.append("")
+        lines.append("Доступные цели:")
+        for entry in _iter_sorted(store):
+            record_id = entry["id"]
+            label = store.labels.get(record_id)
+            target = entry.get("target", "")
+            user = entry.get("user", "")
+            login = f"{user}@{target}" if user else target
+            port = entry.get("port", 22)
+            jump_chain = " -> ".join(entry.get("jump_chain", [])) or "direct"
+            if label:
+                name = label
+            else:
+                name = login or record_id
+            port_suffix = f":{port}" if port and port != 22 else ""
+            if jump_chain == "direct":
+                lines.append(f" • {name}: {login}{port_suffix}")
+            else:
+                lines.append(f" • {name}: {login}{port_suffix} через {jump_chain}")
+    else:
+        lines.append("")
+        lines.append("Инвентарь пуст. Используйте ssh/scp/sftp, чтобы добавить записи.")
+    lines.append("")
+    lines.append("Переименовать цель: codex-hostctl rename <id> <name>")
+    lines.append("Экспорт JSON: codex-hostctl export")
+    return "\n".join(lines) + "\n"
+
+
+def _refresh_motd(store: InventoryStore) -> None:
+    try:
+        dest_path = MOTD_PATH
+        if dest_path is None:
+            return
+        if not dest_path.parent.exists():
+            return
+        content = _render_motd(store)
+        tmp_path = dest_path.with_suffix(dest_path.suffix + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.chmod(tmp_path, 0o644)
+        os.replace(tmp_path, dest_path)
+    except Exception:
+        return
+
+
 def cmd_motd(args: argparse.Namespace) -> int:
     with InventoryStore() as store:
-        lines: List[str] = []
-        base_message = args.header or os.environ.get("CODEX_SSH_MOTD", "Codex SSH bastion")
-        lines.append(base_message)
-        if store.inventory:
-            lines.append("")
-            lines.append("Доступные цели:")
-            for entry in _iter_sorted(store):
-                record_id = entry["id"]
-                name = store.labels.get(record_id, record_id)
-                target = entry.get("target", "")
-                port = entry.get("port", 22)
-                jump_chain = " -> ".join(entry.get("jump_chain", [])) or "direct"
-                lines.append(f" • {name} ({target}:{port}) через {jump_chain}")
-        else:
-            lines.append("")
-            lines.append("Инвентарь пуст. Используйте ssh/scp/sftp, чтобы добавить записи.")
-        lines.append("")
-        lines.append("Переименовать цель: codex-hostctl rename <id> <name>")
-        lines.append("Экспорт JSON: codex-hostctl export")
-        print("\n".join(lines))
+        sys.stdout.write(_render_motd(store, args.header))
     return 0
 
 
@@ -198,6 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_record.add_argument("--port", type=int, default=22)
     p_record.add_argument("--jump-chain", nargs="*", default=[])
     p_record.add_argument("--fingerprint", default="")
+    p_record.add_argument("--user", default="")
     p_record.set_defaults(func=cmd_record)
 
     p_list = sub.add_parser("list", help="Показать таблицу инвентаря")
@@ -214,6 +304,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_motd = sub.add_parser("motd", help="Сгенерировать сообщение дня")
     p_motd.add_argument("--header", default="")
     p_motd.set_defaults(func=cmd_motd)
+
+    p_learn = sub.add_parser("learn", help="Быстро добавить цель и цепочку переходов")
+    p_learn.add_argument("login", help="Формат: user@host или просто host")
+    p_learn.add_argument("--port", type=int, default=22)
+    p_learn.add_argument("--via", action="append", default=[], help="Промежуточные узлы (можно повторить)")
+    p_learn.add_argument("--id", default=None, help="Явно указать идентификатор записи")
+    p_learn.set_defaults(func=cmd_learn)
 
     return parser
 

@@ -41,7 +41,7 @@ SSH_TUNNEL_PORT=${SSH_TUNNEL_PORT:-8080}
 SSH_TUNNEL_SECRET_NAME=${SSH_TUNNEL_SECRET_NAME:-ssh-bastion-tunnel}
 SSH_TUNNEL_USER=${SSH_TUNNEL_USER:-codex}
 SSH_TUNNEL_TOKEN=${SSH_TUNNEL_TOKEN:-}
-SSH_MOTD_CONTENT=${SSH_MOTD_CONTENT:-"Codex SSH bastion\nИспользуйте codex-hostctl list, чтобы увидеть найденные цели."}
+SSH_MOTD_CONTENT=${SSH_MOTD_CONTENT:-$'Codex SSH bastion\nИспользуйте codex-hostctl list, чтобы увидеть найденные цели.'}
 SSH_NODE_NAME=${SSH_NODE_NAME:-}
 SSH_GENERATE_WORKSPACE_KEY=${SSH_GENERATE_WORKSPACE_KEY:-auto}
 SSH_WORKSPACE_KEY_TYPE=${SSH_WORKSPACE_KEY_TYPE:-ed25519}
@@ -215,10 +215,11 @@ else
 fi
 
 if [[ -n "${SSH_MOTD_CONTENT}" ]]; then
+  MOTD_RENDERED="$(printf '%b' "${SSH_MOTD_CONTENT}")"
   MOTD_BLOCK=""
   while IFS= read -r line; do
     MOTD_BLOCK+=$'    '"${line}"$'\n'
-  done <<<"${SSH_MOTD_CONTENT}"
+  done <<<"${MOTD_RENDERED}"
   SSH_MOTD_CONTENT_BLOCK=${MOTD_BLOCK%$'\n'}
 else
   SSH_MOTD_CONTENT_BLOCK='    Codex SSH bastion'
