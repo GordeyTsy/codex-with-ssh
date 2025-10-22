@@ -188,8 +188,33 @@ def cmd_export(args: argparse.Namespace) -> int:
                     "last_seen": entry.get("last_seen", ""),
                 }
             )
-        json.dump(payload, sys.stdout, indent=2, sort_keys=True)
-        sys.stdout.write("\n")
+        if args.format == "json":
+            json.dump(payload, sys.stdout, sort_keys=True, separators=(",", ":"))
+            sys.stdout.write("\n")
+        elif args.format == "pretty-json":
+            json.dump(payload, sys.stdout, indent=2, sort_keys=True)
+            sys.stdout.write("\n")
+        elif args.format == "tsv":
+            headers = ["id", "name", "target", "port", "user", "jump_chain", "fingerprint", "last_seen"]
+            sys.stdout.write("\t".join(headers) + "\n")
+            for entry in payload:
+                sys.stdout.write(
+                    "\t".join(
+                        [
+                            str(entry.get("id", "")),
+                            str(entry.get("name", "")),
+                            str(entry.get("target", "")),
+                            str(entry.get("port", "")),
+                            str(entry.get("user", "")),
+                            ",".join(entry.get("jump_chain", [])),
+                            str(entry.get("fingerprint", "")),
+                            str(entry.get("last_seen", "")),
+                        ]
+                    )
+                    + "\n"
+                )
+        else:
+            raise SystemExit(f"Unsupported export format: {args.format}")
     return 0
 
 
@@ -293,7 +318,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_list = sub.add_parser("list", help="Показать таблицу инвентаря")
     p_list.set_defaults(func=cmd_list)
 
-    p_export = sub.add_parser("export", help="Экспортировать инвентарь в JSON")
+    p_export = sub.add_parser("export", help="Экспортировать инвентарь")
+    p_export.add_argument(
+        "--format",
+        choices=("json", "pretty-json", "tsv"),
+        default="pretty-json",
+        help="Формат вывода (по умолчанию pretty-json).",
+    )
     p_export.set_defaults(func=cmd_export)
 
     p_rename = sub.add_parser("rename", help="Присвоить понятное имя цели")

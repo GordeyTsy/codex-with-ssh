@@ -83,3 +83,27 @@
 - Логи: `kubectl -n codex-ssh logs deploy/ssh-bastion -f`.
 - Содержимое данных: `kubectl -n codex-ssh exec deploy/ssh-bastion -- ls -l /var/lib/codex-ssh`.
 - Для ручного администрирования внутри кластера используем `ssh-bastion-internal.codex-ssh.svc.cluster.local:22`.
+
+
+
+
+<!-- BEGIN CODEX SSH INVENTORY -->
+### SSH-инвентарь
+
+| Имя | ProxyJump | Хост | Пользователь | Порт | Метки |
+| --- | --------- | ---- | ------------ | ---- | ----- |
+| 192.168.1.115:22 | codex-ssh-bastion | 192.168.1.115 | gt | 22 | — |
+| 192.168.1.1:22 | codex-ssh-bastion | 192.168.1.1 | gt | 22 | — |
+
+ℹ️ Переименовать цель: `codex-hostctl rename <old> <new>`.
+
+### Using the SSH bastion
+
+1. Run `./scripts/setup-codex-workspace.sh` whenever the workspace starts (also add it to the Maintenance script so cached restores keep the tunnel alive).
+2. Connect to any listed alias with `ssh <alias>` — the managed SSH config injects the ProxyJump chain automatically.
+3. After teaching the bastion new routes, rerun the helper so the inventory and tunnel metadata stay fresh.
+
+Туннель: chisel → https://codex-ssh.cyberspace.keenetic.link:443 → локальный порт 4022
+PID: /home/gt/projects/my/codex-with-ssh/configs/ssh-chisel.pid
+Лог: /home/gt/projects/my/codex-with-ssh/configs/ssh-chisel.log
+<!-- END CODEX SSH INVENTORY -->

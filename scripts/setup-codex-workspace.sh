@@ -91,10 +91,11 @@ SSH_CHISEL_VERSION="${SSH_CHISEL_VERSION:-1.9.1}"
 SSH_CHISEL_PID_FILE="${SSH_CHISEL_PID_FILE:-${CONFIG_DIR}/ssh-chisel.pid}"
 SSH_CHISEL_LOG_FILE="${SSH_CHISEL_LOG_FILE:-${CONFIG_DIR}/ssh-chisel.log}"
 SSH_CHISEL_LOG_LINES="${SSH_CHISEL_LOG_LINES:-200}"
-SSH_KNOWN_HOSTS_REFRESH_RETRIES="${SSH_KNOWN_HOSTS_REFRESH_RETRIES:-10}"
+SSH_KNOWN_HOSTS_REFRESH_RETRIES="${SSH_KNOWN_HOSTS_REFRESH_RETRIES:-30}"
 SSH_KNOWN_HOSTS_REFRESH_DELAY="${SSH_KNOWN_HOSTS_REFRESH_DELAY:-1}"
-SSH_INVENTORY_RETRIES="${SSH_INVENTORY_RETRIES:-5}"
-SSH_INVENTORY_RETRY_DELAY="${SSH_INVENTORY_RETRY_DELAY:-3}"
+SSH_INVENTORY_RETRIES="${SSH_INVENTORY_RETRIES:-12}"
+SSH_INVENTORY_RETRY_DELAY="${SSH_INVENTORY_RETRY_DELAY:-5}"
+SSH_INVENTORY_CONNECT_TIMEOUT="${SSH_INVENTORY_CONNECT_TIMEOUT:-30}"
 
 parse_bastion_endpoint() {
   "${PYTHON_BIN}" - <<'PY'
@@ -398,7 +399,7 @@ fetch_inventory() {
   local ssh_opts=(
     -F "${SSH_CONFIG_PATH}"
     -o BatchMode=yes
-    -o ConnectTimeout=20
+    -o ConnectTimeout="${SSH_INVENTORY_CONNECT_TIMEOUT}"
     codex-ssh-bastion
     -- "codex-hostctl" "export" "--format" "json"
   )
@@ -419,6 +420,8 @@ fetch_inventory() {
   if [[ "${success}" -eq 1 ]]; then
     return 0
   fi
+  log_warn "Inventory fetch failed after ${SSH_INVENTORY_RETRIES} attempts."
+  print_chisel_log
   return 1
 }
 
@@ -609,10 +612,15 @@ lines.extend([
     "3. After teaching the bastion new routes, rerun the helper so the inventory and tunnel metadata stay fresh.",
 ])
 if gateway_node:
-    lines.append("")
-    lines.append(f"Туннель: chisel → https://{gateway_node} → локальный порт {local_port}")
-    lines.append(f"PID: {str(chisel_pid_path)}")
-    lines.append(f"Лог: {str(chisel_log_path)}")
+  gateway_display=gateway_node
+  if gateway_display.startswith("https://"):
+    gateway_display=gateway_display[len("https://") :]
+  elif gateway_display.startswith("http://"):
+    gateway_display=gateway_display[len("http://") :]
+  lines.append("")
+  lines.append(f"Туннель: chisel → https://{gateway_display} → локальный порт {local_port}")
+  lines.append(f"PID: {str(chisel_pid_path)}")
+  lines.append(f"Лог: {str(chisel_log_path)}")
 summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 config_lines = []

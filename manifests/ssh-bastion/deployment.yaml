@@ -71,6 +71,7 @@ ${SSH_NODE_PLACEMENT_BLOCK}
             - --port=${SSH_CHISEL_PORT}
             - --auth=$(SSH_CHISEL_AUTH)
             - --keepalive=25s
+${SSH_CHISEL_EXTRA_ARGS_BLOCK}
           env:
             - name: SSH_CHISEL_PORT
               value: "${SSH_CHISEL_PORT}"

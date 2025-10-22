@@ -41,11 +41,13 @@ SSH_TUNNEL_PORT=${SSH_TUNNEL_PORT:-8080}
 SSH_TUNNEL_SECRET_NAME=${SSH_TUNNEL_SECRET_NAME:-ssh-bastion-tunnel}
 SSH_TUNNEL_USER=${SSH_TUNNEL_USER:-codex}
 SSH_TUNNEL_TOKEN=${SSH_TUNNEL_TOKEN:-}
+SSH_CHISEL_EXTRA_ARGS=${SSH_CHISEL_EXTRA_ARGS:-"-v"}
 SSH_MOTD_CONTENT=${SSH_MOTD_CONTENT:-$'Codex SSH bastion\nИспользуйте codex-hostctl list, чтобы увидеть найденные цели.'}
 SSH_NODE_NAME=${SSH_NODE_NAME:-}
 SSH_GENERATE_WORKSPACE_KEY=${SSH_GENERATE_WORKSPACE_KEY:-auto}
 SSH_WORKSPACE_KEY_TYPE=${SSH_WORKSPACE_KEY_TYPE:-ed25519}
 SSH_WORKSPACE_KEY_COMMENT=${SSH_WORKSPACE_KEY_COMMENT:-codex@workspace}
+SSH_WORKSPACE_KEY_OUTPUT=${SSH_WORKSPACE_KEY_OUTPUT:-${ROOT_DIR}/configs/workspace-key}
 
 if [[ -n "${SSH_IMAGE_REGISTRY}" ]]; then
   SSH_BASTION_IMAGE_REF="${SSH_IMAGE_REGISTRY%/}/${SSH_BASTION_IMAGE}"
@@ -227,12 +229,21 @@ fi
 
 SSH_CHISEL_PORT="${SSH_TUNNEL_PORT}"
 
+SSH_CHISEL_EXTRA_ARGS_BLOCK=""
+if [[ -n "${SSH_CHISEL_EXTRA_ARGS}" ]]; then
+  while IFS= read -r chisel_arg; do
+    [[ -z "${chisel_arg}" ]] && continue
+    SSH_CHISEL_EXTRA_ARGS_BLOCK+=$'            - '"${chisel_arg}"$'\n'
+  done < <(printf '%s\n' "${SSH_CHISEL_EXTRA_ARGS}" | tr ' ' '\n')
+  SSH_CHISEL_EXTRA_ARGS_BLOCK=${SSH_CHISEL_EXTRA_ARGS_BLOCK%$'\n'}
+fi
+
 export SSH_NAMESPACE SSH_DEPLOYMENT_NAME SSH_SERVICE_NAME SSH_SERVICE_TYPE \
   SSH_SERVICE_NODE_PORT SSH_SERVICE_NODE_PORT_LINE SSH_PVC_NAME SSH_PVC_SIZE \
   SSH_STORAGE_CLASS_BLOCK SSH_CONFIGMAP_NAME SSH_AUTHORIZED_SECRET \
   SSH_BASTION_IMAGE_REF SSH_MOTD_CONTENT_BLOCK SSH_DATA_VOLUME_BLOCK \
   SSH_NODE_PLACEMENT_BLOCK EFFECTIVE_STORAGE_TYPE SSH_SERVICE_PORT \
-  SSH_CHISEL_PORT SSH_TUNNEL_SECRET_NAME
+  SSH_CHISEL_PORT SSH_TUNNEL_SECRET_NAME SSH_CHISEL_EXTRA_ARGS_BLOCK
 
 case "${SSH_GENERATE_WORKSPACE_KEY}" in
   true|false|auto)
@@ -299,6 +310,13 @@ if [[ "${GENERATE_WORKSPACE_KEY}" == true ]]; then
   SSH_AUTHORIZED_KEYS_FILE="${WORKSPACE_KEY_BASE}.pub"
   WORKSPACE_PRIVATE_KEY_PATH="${WORKSPACE_KEY_BASE}"
   printf 'Generated new workspace key pair (%s)\n' "${SSH_WORKSPACE_KEY_TYPE}"
+
+  if [[ -n "${SSH_WORKSPACE_KEY_OUTPUT}" ]]; then
+    mkdir -p "$(dirname "${SSH_WORKSPACE_KEY_OUTPUT}")"
+    cp "${WORKSPACE_PRIVATE_KEY_PATH}" "${SSH_WORKSPACE_KEY_OUTPUT}"
+    chmod 600 "${SSH_WORKSPACE_KEY_OUTPUT}"
+    WORKSPACE_PRIVATE_KEY_PATH="${SSH_WORKSPACE_KEY_OUTPUT}"
+  fi
 fi
 
 if [[ -n "${SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
@@ -438,9 +456,13 @@ if [[ -n "${WORKSPACE_PRIVATE_KEY_PATH}" ]]; then
   cat "${WORKSPACE_PRIVATE_KEY_PATH}"
   printf '\n'
 else
-  if [[ -n "${SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
+  if [[ -n "${SSH_WORKSPACE_KEY_OUTPUT}" && -f "${SSH_WORKSPACE_KEY_OUTPUT}" ]]; then
+    printf '\nИспользуйте сохранённый приватный ключ (%s).\n' "${SSH_WORKSPACE_KEY_OUTPUT}"
+    cat "${SSH_WORKSPACE_KEY_OUTPUT}"
+    printf '\n'
+  elif [[ -n "${SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
     printf '\nПриватный ключ не выводится, так как использован подготовленный authorized_keys (%s).\n' "${SSH_AUTHORIZED_KEYS_FILE}"
   else
-    printf '\nПриватный ключ не был сгенерирован автоматически.\n'
+    printf '\nПриватный ключ не был сгенерирован автоматически (секрет %s уже существует). Удалите секрет или установите SSH_GENERATE_WORKSPACE_KEY=true, чтобы выпустить новую пару ключей.\n' "${SSH_AUTHORIZED_SECRET}"
   fi
 fi
