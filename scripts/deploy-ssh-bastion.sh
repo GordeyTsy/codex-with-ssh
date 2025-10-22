@@ -177,39 +177,6 @@ fi
 
 TUNNEL_SECRET_EXISTS=false
 EXISTING_TUNNEL_TOKEN=""
-if kubectl -n "${SSH_NAMESPACE}" get secret "${SSH_TUNNEL_SECRET_NAME}" >/dev/null 2>&1; then
-  TUNNEL_SECRET_EXISTS=true
-  existing_auth_b64="$(kubectl -n "${SSH_NAMESPACE}" get secret "${SSH_TUNNEL_SECRET_NAME}" -o jsonpath='{.data.auth}' 2>/dev/null || true)"
-  if [[ -n "${existing_auth_b64}" ]]; then
-    existing_auth="$(printf '%s' "${existing_auth_b64}" | base64 --decode 2>/dev/null || true)"
-    if [[ "${existing_auth}" == "${SSH_TUNNEL_USER}:"* ]]; then
-      EXISTING_TUNNEL_TOKEN="${existing_auth#${SSH_TUNNEL_USER}:}"
-    fi
-  fi
-fi
-
-if [[ -z "${SSH_TUNNEL_TOKEN}" ]]; then
-  if [[ -n "${EXISTING_TUNNEL_TOKEN}" ]]; then
-    SSH_TUNNEL_TOKEN="${EXISTING_TUNNEL_TOKEN}"
-  else
-    SSH_TUNNEL_TOKEN="$(python3 - <<'PY'
-import secrets
-import string
-alphabet = string.ascii_letters + string.digits
-print(''.join(secrets.choice(alphabet) for _ in range(32)))
-PY
-)"
-  fi
-fi
-
-TUNNEL_AUTH_VALUE="${SSH_TUNNEL_USER}:${SSH_TUNNEL_TOKEN}"
-printf 'Configuring tunnel secret %s (user=%s)\n' "${SSH_TUNNEL_SECRET_NAME}" "${SSH_TUNNEL_USER}"
-TUNNEL_SECRET_MANIFEST="${TMP_DIR}/tunnel-secret.yaml"
-kubectl -n "${SSH_NAMESPACE}" create secret generic "${SSH_TUNNEL_SECRET_NAME}" \
-  --from-literal=auth="${TUNNEL_AUTH_VALUE}" \
-  --dry-run=client -o yaml >"${TUNNEL_SECRET_MANIFEST}"
-kubectl apply -f "${TUNNEL_SECRET_MANIFEST}"
-
 if [[ -n "${SSH_NODE_NAME}" ]]; then
   SSH_NODE_PLACEMENT_BLOCK=$'      nodeName: '"${SSH_NODE_NAME}"
 else
@@ -278,8 +245,41 @@ render "${MANIFEST_DIR}/deployment.yaml" "${TMP_DIR}/deployment.yaml"
 render "${MANIFEST_DIR}/service.yaml" "${TMP_DIR}/service.yaml"
 render "${MANIFEST_DIR}/service-internal.yaml" "${TMP_DIR}/service-internal.yaml"
 
-printf 'Applying manifests to namespace %s\n' "${SSH_NAMESPACE}"
+printf 'Ensuring namespace %s exists\n' "${SSH_NAMESPACE}"
 kubectl apply -f "${TMP_DIR}/namespace.yaml"
+
+if kubectl -n "${SSH_NAMESPACE}" get secret "${SSH_TUNNEL_SECRET_NAME}" >/dev/null 2>&1; then
+  TUNNEL_SECRET_EXISTS=true
+  existing_auth_b64="$(kubectl -n "${SSH_NAMESPACE}" get secret "${SSH_TUNNEL_SECRET_NAME}" -o jsonpath='{.data.auth}' 2>/dev/null || true)"
+  if [[ -n "${existing_auth_b64}" ]]; then
+    existing_auth="$(printf '%s' "${existing_auth_b64}" | base64 --decode 2>/dev/null || true)"
+    if [[ "${existing_auth}" == "${SSH_TUNNEL_USER}:"* ]]; then
+      EXISTING_TUNNEL_TOKEN="${existing_auth#${SSH_TUNNEL_USER}:}"
+    fi
+  fi
+fi
+
+if [[ -z "${SSH_TUNNEL_TOKEN}" ]]; then
+  if [[ -n "${EXISTING_TUNNEL_TOKEN}" ]]; then
+    SSH_TUNNEL_TOKEN="${EXISTING_TUNNEL_TOKEN}"
+  else
+    SSH_TUNNEL_TOKEN="$(python3 - <<'PY'
+import secrets
+import string
+alphabet = string.ascii_letters + string.digits
+print(''.join(secrets.choice(alphabet) for _ in range(32)))
+PY
+)"
+  fi
+fi
+
+TUNNEL_AUTH_VALUE="${SSH_TUNNEL_USER}:${SSH_TUNNEL_TOKEN}"
+printf 'Configuring tunnel secret %s (user=%s)\n' "${SSH_TUNNEL_SECRET_NAME}" "${SSH_TUNNEL_USER}"
+TUNNEL_SECRET_MANIFEST="${TMP_DIR}/tunnel-secret.yaml"
+kubectl -n "${SSH_NAMESPACE}" create secret generic "${SSH_TUNNEL_SECRET_NAME}" \
+  --from-literal=auth="${TUNNEL_AUTH_VALUE}" \
+  --dry-run=client -o yaml >"${TUNNEL_SECRET_MANIFEST}"
+kubectl apply -f "${TUNNEL_SECRET_MANIFEST}"
 
 SECRET_EXISTS=false
 if kubectl -n "${SSH_NAMESPACE}" get secret "${SSH_AUTHORIZED_SECRET}" >/dev/null 2>&1; then
