@@ -137,6 +137,7 @@ ensure_permissions() {
 
 write_private_key() {
   local dest="$1" content="$2"
+  content="${content//$'\r'/}"
   printf '%s\n' "${content}" >"${dest}.tmp"
   chmod 600 "${dest}.tmp"
   mv "${dest}.tmp" "${dest}"

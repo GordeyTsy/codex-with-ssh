@@ -82,7 +82,8 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 KEY_PATH="${TMP_DIR}/id"
-printf '%s\n' "${SSH_KEY%$'\r'}" >"${KEY_PATH}"
+SANITIZED_KEY="${SSH_KEY//$'\r'/}"
+printf '%s\n' "${SANITIZED_KEY}" >"${KEY_PATH}"
 chmod 600 "${KEY_PATH}"
 
 CONFIG_PATH="${TMP_DIR}/ssh_config"
