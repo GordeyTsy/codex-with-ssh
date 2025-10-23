@@ -60,9 +60,10 @@ Requirements: `kubectl`, `envsubst`, `docker` (when `SSH_BUILD_IMAGE=true` or a 
 ## 3. Configure the Codex workspace
 
 1. In **Settings → Variables** add: 
-   - `SSH_GW_NODE=<keen-dns-domain>:443` (port 443 keeps corporate proxies happy because they only allow TLS-friendly tunnels).
-   - `SSH_GW_USER=codex`
-   - `SSH_GW_TOKEN=<the token printed by the deploy script>`
+  - `SSH_GW_NODE=<keen-dns-domain>:443` (port 443 keeps corporate proxies happy because they only allow TLS-friendly tunnels).
+  - `SSH_GW_USER=codex`
+  - `SSH_GW_TOKEN=<the token printed by the deploy script>`
+  - *(optional)* `SSH_HTTP_INSECURE=1` if your HTTPS endpoint presents a mismatched or self-signed certificate.
 2. In **Settings → Secrets** add: `SSH_KEY=<the private key printed by the deploy script>`.
 3. In the workspace container, run:
 
@@ -124,6 +125,9 @@ The script writes the private key to a temporary location, composes a one-off `s
 | `SSH_PUBLIC_PORT` | Public port served by the reverse proxy. | `443` |
 | `SSH_PUBLIC_SCHEME` | URL scheme advertised to Codex (usually `https`). | `https` |
 | `SSH_HTTP_TUNNEL_PORT` | Container port listened by the HTTP tunnel gateway. | `8080` |
+| `SSH_HTTP_INSECURE` | Set to `1` to let the workspace helper skip TLS verification (useful for self-signed or mismatched certificates). | `0` |
+| `SSH_HTTP_SNI` | Override SNI/Host header passed by the proxy helper. | — |
+| `SSH_HTTP_CA_FILE` | Custom CA bundle path consumed by the proxy helper. | — |
 | `SSH_TUNNEL_SECRET_NAME` | Secret storing `user:token` for the tunnel. | `ssh-bastion-tunnel` |
 | `SSH_TUNNEL_USER` | Username for the tunnel. | `codex` |
 | `SSH_TUNNEL_TOKEN` | Optional fixed token; empty value lets the script generate one. | – |

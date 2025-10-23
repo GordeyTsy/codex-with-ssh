@@ -86,7 +86,7 @@
 <!-- BEGIN CODEX SSH INVENTORY -->
 ### SSH-инвентарь
 
-Инвентарь недоступен: не удалось получить данные.
+Инвентарь пуст — codex-hostctl не вернул целей.
 
 ℹ️ Переименовать цель: `codex-hostctl rename <old> <new>`.
 
@@ -96,6 +96,6 @@
 2. Connect to any listed alias with `ssh <alias>` — the managed SSH config injects the HTTP tunnel automatically.
 3. After teaching the bastion new routes, rerun the helper so the inventory and tunnel metadata stay fresh.
 
-Туннель: ssh-http-proxy → https://example.com:443
-ProxyCommand script: /home/gt/projects/my/codex-with-ssh/scripts/ssh-http-proxy.py
+Туннель: ssh-http-proxy → https://codex-ssh.cyberspace.keenetic.link:443
+ProxyCommand script: /workspace/codex-with-ssh/scripts/ssh-http-proxy.py
 <!-- END CODEX SSH INVENTORY -->

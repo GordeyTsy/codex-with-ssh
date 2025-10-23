@@ -76,6 +76,9 @@ SSH_HTTP_PROXY_SCRIPT="${SSH_HTTP_PROXY_SCRIPT:-${ROOT_DIR}/scripts/ssh-http-pro
 SSH_HTTP_READ_TIMEOUT="${SSH_HTTP_READ_TIMEOUT:-25}"
 SSH_HOST_LABEL_OVERRIDES="${SSH_HOST_LABEL_OVERRIDES:-}"
 PROJECT_ROOT_FOR_NOTES="${PROJECT_ROOT_FOR_NOTES:-${ROOT_DIR}}"
+SSH_HTTP_INSECURE="${SSH_HTTP_INSECURE:-0}"
+SSH_HTTP_SNI="${SSH_HTTP_SNI:-}"
+SSH_HTTP_CA_FILE="${SSH_HTTP_CA_FILE:-}"
 
 if [[ -z "${SSH_GW_TOKEN}" ]]; then
   log_error "SSH_GW_TOKEN is not set. Provide the token from deploy-ssh-bastion.sh output."
@@ -199,6 +202,15 @@ PY
 }
 
 PROXY_COMMAND="python3 ${SSH_HTTP_PROXY_SCRIPT} --endpoint ${GW_ENDPOINT} --user ${SSH_GW_USER} --token ${SSH_GW_TOKEN} --target %h:%p --read-timeout ${SSH_HTTP_READ_TIMEOUT}"
+if [[ "${SSH_HTTP_INSECURE}" != "0" ]]; then
+  PROXY_COMMAND+=" --insecure"
+fi
+if [[ -n "${SSH_HTTP_CA_FILE}" ]]; then
+  PROXY_COMMAND+=" --ca-file ${SSH_HTTP_CA_FILE}"
+fi
+if [[ -n "${SSH_HTTP_SNI}" ]]; then
+  PROXY_COMMAND+=" --sni ${SSH_HTTP_SNI}"
+fi
 
 build_ssh_config() {
   cat <<EOF

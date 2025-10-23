@@ -20,6 +20,10 @@ require_env "SSH_GW_TOKEN"
 
 SSH_GW_USER="${SSH_GW_USER:-codex}"
 SSH_HTTP_PROXY_SCRIPT="${SSH_HTTP_PROXY_SCRIPT:-${ROOT_DIR}/scripts/ssh-http-proxy.py}"
+SSH_HTTP_READ_TIMEOUT="${SSH_HTTP_READ_TIMEOUT:-25}"
+SSH_HTTP_INSECURE="${SSH_HTTP_INSECURE:-0}"
+SSH_HTTP_CA_FILE="${SSH_HTTP_CA_FILE:-}"
+SSH_HTTP_SNI="${SSH_HTTP_SNI:-}"
 
 if ! command -v python3 >/dev/null 2>&1; then
   err "python3 is required."
@@ -95,7 +99,7 @@ Host bastion-http-test
     IdentitiesOnly yes
     UserKnownHostsFile ${KNOWN_HOSTS}
     StrictHostKeyChecking accept-new
-    ProxyCommand python3 ${SSH_HTTP_PROXY_SCRIPT} --endpoint ${GW_ENDPOINT} --user ${SSH_GW_USER} --token ${SSH_GW_TOKEN} --target %h:%p --verbose
+    ProxyCommand python3 ${SSH_HTTP_PROXY_SCRIPT} --endpoint ${GW_ENDPOINT} --user ${SSH_GW_USER} --token ${SSH_GW_TOKEN} --target %h:%p --read-timeout ${SSH_HTTP_READ_TIMEOUT} --verbose${SSH_HTTP_INSECURE:+ --insecure}${SSH_HTTP_CA_FILE:+ --ca-file ${SSH_HTTP_CA_FILE}}${SSH_HTTP_SNI:+ --sni ${SSH_HTTP_SNI}}
 EOF
 
 log "Connecting to bastion via HTTPS tunnel (${GW_ENDPOINT})"

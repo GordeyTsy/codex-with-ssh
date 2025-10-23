@@ -15,6 +15,7 @@ from typing import Optional
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
+import ssl
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +26,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target", default=os.environ.get("SSH_HTTP_TARGET", "127.0.0.1:22"), help="Backend target host:port (defaults to 127.0.0.1:22).")
     parser.add_argument("--read-timeout", type=float, default=float(os.environ.get("SSH_HTTP_READ_TIMEOUT", "25")), help="Long-poll read timeout in seconds (default: 25).")
     parser.add_argument("--max-chunk", type=int, default=int(os.environ.get("SSH_HTTP_MAX_CHUNK", "65536")), help="Max chunk size per HTTP write (default: 65536).")
+    parser.add_argument("--insecure", action="store_true", default=os.environ.get("SSH_HTTP_INSECURE", "0") == "1", help="Skip TLS certificate verification.")
+    parser.add_argument("--ca-file", default=os.environ.get("SSH_HTTP_CA_FILE", ""), help="Custom CA bundle for HTTPS verification.")
+    parser.add_argument("--sni", default=os.environ.get("SSH_HTTP_SNI", ""), help="Override SNI/Host header when connecting upstream.")
     parser.add_argument("--verbose", action="store_true", help="Verbose logging to stderr.")
     return parser
 
@@ -36,11 +40,27 @@ def log(message: str, verbose: bool) -> None:
 
 
 class TunnelClient:
-    def __init__(self, endpoint: str, credentials: str, read_timeout: float, verbose: bool) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        credentials: str,
+        read_timeout: float,
+        insecure: bool,
+        ca_file: str,
+        sni_override: str,
+        verbose: bool,
+    ) -> None:
         self.endpoint = endpoint.rstrip("/")
         self.credentials = credentials
         self.read_timeout = read_timeout
         self.verbose = verbose
+        self.sni_override = sni_override.strip()
+        self.context = ssl.create_default_context()
+        if ca_file:
+            self.context.load_verify_locations(cafile=ca_file)
+        if insecure:
+            self.context.check_hostname = False
+            self.context.verify_mode = ssl.CERT_NONE
 
     def _request(self, method: str, path: str, payload: Optional[dict] = None, timeout: Optional[float] = None) -> dict:
         url = urljoin(self.endpoint + "/", path.lstrip("/"))
@@ -53,8 +73,10 @@ class TunnelClient:
             data_bytes = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
         req = urllib_request.Request(url, data=data_bytes, headers=headers, method=method)
+        if self.sni_override:
+            req.host = self.sni_override
         try:
-            with urllib_request.urlopen(req, timeout=timeout) as resp:
+            with urllib_request.urlopen(req, timeout=timeout, context=self.context) as resp:
                 body = resp.read()
                 if not body:
                     return {}
@@ -103,9 +125,17 @@ def main() -> int:
         parser.error("--token is required (or set SSH_HTTP_TOKEN)")
 
     creds = base64.b64encode(f"{args.user}:{args.token}".encode("utf-8")).decode("ascii")
-    client = TunnelClient(args.endpoint, creds, args.read_timeout, args.verbose)
+    client = TunnelClient(
+        args.endpoint,
+        creds,
+        args.read_timeout,
+        args.insecure,
+        args.ca_file,
+        args.sni,
+        args.verbose,
+    )
     stdout = sys.stdout.buffer
-    stdin = sys.stdin.buffer
+    stdin_fd = sys.stdin.fileno()
     stop_event = threading.Event()
     exit_status = 0
     error_queue: "queue.Queue[str]" = queue.Queue()
@@ -135,6 +165,7 @@ def main() -> int:
                         exit_status = 1
                         stop_event.set()
                         break
+                    log(f"reader: received {len(chunk)} bytes", args.verbose)
                     stdout.write(chunk)
                     stdout.flush()
                 if response.get("closed"):
@@ -147,9 +178,10 @@ def main() -> int:
         nonlocal exit_status
         try:
             while not stop_event.is_set():
-                chunk = stdin.read(args.max_chunk)
+                chunk = os.read(stdin_fd, args.max_chunk)
                 if not chunk:
                     break
+                log(f"writer: sending {len(chunk)} bytes", args.verbose)
                 client.write(session_id, chunk)
         except Exception as exc:  # noqa: BLE001
             error_queue.put(f"write failed: {exc}")
