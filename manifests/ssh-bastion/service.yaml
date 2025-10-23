@@ -10,7 +10,7 @@ spec:
   selector:
     app.kubernetes.io/name: ssh-bastion
   ports:
-    - name: chisel
+    - name: http-tunnel
       port: ${SSH_SERVICE_PORT}
-      targetPort: chisel
+      targetPort: http-tunnel
 ${SSH_SERVICE_NODE_PORT_LINE}

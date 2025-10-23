@@ -11,7 +11,7 @@ This repository delivers an SSH bastion that lives inside a trusted Kubernetes c
 - **Image sources** – [`images/ssh-bastion/`](images/ssh-bastion/) contains the Dockerfile, entrypoint, telemetry wrappers, and the `codex-hostctl` CLI.
 - **Manifest templates** – [`manifests/ssh-bastion/`](manifests/ssh-bastion/) keeps namespace, ConfigMap, Deployment, and Service templates. They are filled via `envsubst` during deployment.
 - **Host script** – [`scripts/deploy-ssh-bastion.sh`](scripts/deploy-ssh-bastion.sh) is the single entry point: it can (optionally) build/push the image, applies manifests, waits for rollout, and prints the Codex-facing endpoint together with the SSH private key.
-- **Workspace script** – [`scripts/setup-codex-workspace.sh`](scripts/setup-codex-workspace.sh) installs the private key, refreshes `~/.ssh/config`, starts the HTTPS tunnel, and keeps the AGENTS documentation in sync.
+- **Workspace script** – [`scripts/setup-codex-workspace.sh`](scripts/setup-codex-workspace.sh) installs the private key, refreshes `~/.ssh/config`, wires in the HTTP-based tunnel helper, and keeps the AGENTS documentation in sync.
 
 ---
 
@@ -48,7 +48,7 @@ Requirements: `kubectl`, `envsubst`, `docker` (when `SSH_BUILD_IMAGE=true` or a 
    ```bash
    kubectl -n codex-ssh get pods -o wide
    kubectl -n codex-ssh get svc ssh-bastion -o wide
-   curl -i http://<node-ip>:32222   # expect HTTP 404 from chisel; that confirms the NodePort is reachable
+  curl -i http://<node-ip>:32222/healthz   # expect HTTP 200 from the HTTP tunnel gateway
    kubectl -n codex-ssh port-forward service/ssh-bastion-internal 2222:22 &
    ssh -p 2222 codex@127.0.0.1      # остановите port-forward после проверки (Ctrl+C)
    ```
@@ -77,10 +77,15 @@ Requirements: `kubectl`, `envsubst`, `docker` (when `SSH_BUILD_IMAGE=true` or a 
    cd "$PROJECT_PATH"
    ```
 
-   The helper script installs the key into `configs/id-codex-ssh`, launches a background HTTPS tunnel (via `chisel`) on `127.0.0.1:${SSH_TUNNEL_LOCAL_PORT:-4022}` (PID in `configs/ssh-chisel.pid`, log in `configs/ssh-chisel.log`), refreshes `~/.ssh/config`, downloads the bastion inventory, and updates any `AGENTS.md` it finds.
+   The helper script writes the key to `configs/id-codex-ssh`, injects a managed `ProxyCommand` that invokes `scripts/ssh-http-proxy.py`, refreshes `~/.ssh/config`, downloads the bastion inventory, and updates any `AGENTS.md` it finds.
 
    If the Codex container resumes from cache, rerun the helper manually unless you configured the maintenance script in step 4.
-
+   ```bash
+   export PROJECT_PATH="$(pwd)"
+   cd /workspace/codex-with-ssh || exit 0
+   ./scripts/setup-codex-workspace.sh
+   cd "$PROJECT_PATH"
+   ```
 4. For long-lived environments, place the same snippet into Codex’ **Maintenance script** so the configuration is re-applied when the container resumes.
 
 ### 3.1 Optional TLS alternatives
@@ -90,7 +95,18 @@ The default setup relies on a NodePort that KeenDNS (or another reverse proxy) f
 - Expose the Service as `LoadBalancer` (`SSH_SERVICE_TYPE=LoadBalancer`) and supply `SSH_PUBLIC_HOST`/`SSH_PUBLIC_PORT` with the allocated address.
 - Or terminate TLS via an Ingress controller and point KeenDNS (or an external DNS record) at the ingress host. In that case set `SSH_PUBLIC_SCHEME=https` and use the ingress hostname in `SSH_PUBLIC_HOST`.
 
-The workspace flow remains unchanged: Codex still connects through chisel using the HTTPS URL you provide.
+The workspace flow remains unchanged: Codex still connects through the HTTP tunnel helper using the HTTPS URL you provide.
+
+### 3.2 Workspace smoke test
+
+After the helper has updated your SSH config you can run a non-interactive smoke test that proves the HTTPS HTTP tunnel works end-to-end from inside Codex:
+
+```bash
+cd /workspace/codex-with-ssh
+./scripts/test-http-tunnel.sh
+```
+
+The script writes the private key to a temporary location, composes a one-off `ssh_config` with the managed `ProxyCommand`, and executes `codex-hostctl list` through the bastion. It streams the proxy’s verbose logs to stderr, so any failure (network reachability, authentication, inventory access) is immediately visible. This makes the helper suitable for Codex’ “Tests” hook; you only need the same variables and secret from step 3.
 
 ---
 
@@ -102,12 +118,12 @@ The workspace flow remains unchanged: Codex still connects through chisel using 
 | `SSH_DEPLOYMENT_NAME` | Deployment name. | `ssh-bastion` |
 | `SSH_SERVICE_NAME` | Service name. | `ssh-bastion` |
 | `SSH_SERVICE_TYPE` | Service exposure mode (`NodePort`, `LoadBalancer`, `ClusterIP`). | `NodePort` |
-| `SSH_SERVICE_PORT` | Service port exposed to the tunnel clients. | `443` |
+| `SSH_SERVICE_PORT` | Service port exposed to the tunnel clients. | `80` |
 | `SSH_SERVICE_NODE_PORT` | NodePort bound on each node (only used for `NodePort`). | `32222` |
 | `SSH_PUBLIC_HOST` | Public DNS name (KeenDNS or similar) that fronts the NodePort. | — |
 | `SSH_PUBLIC_PORT` | Public port served by the reverse proxy. | `443` |
 | `SSH_PUBLIC_SCHEME` | URL scheme advertised to Codex (usually `https`). | `https` |
-| `SSH_TUNNEL_PORT` | Internal port exposed by the chisel sidecar. | `8080` |
+| `SSH_HTTP_TUNNEL_PORT` | Container port listened by the HTTP tunnel gateway. | `8080` |
 | `SSH_TUNNEL_SECRET_NAME` | Secret storing `user:token` for the tunnel. | `ssh-bastion-tunnel` |
 | `SSH_TUNNEL_USER` | Username for the tunnel. | `codex` |
 | `SSH_TUNNEL_TOKEN` | Optional fixed token; empty value lets the script generate one. | – |
@@ -144,7 +160,7 @@ The workspace flow remains unchanged: Codex still connects through chisel using 
 ## 7. Cleanup
 
 ```bash
-kubectl -n codex-ssh delete deployment/ssh-bastion service/ssh-bastion \
+kubectl -n codex-ssh delete deployment/ssh-bastion service/ssh-bastion service/ssh-bastion-internal \
   configmap/ssh-bastion-config secret/ssh-authorized-keys
 kubectl -n codex-ssh delete pvc/codex-ssh-data   # skip for hostPath deployments
 # Optional: kubectl delete namespace codex-ssh

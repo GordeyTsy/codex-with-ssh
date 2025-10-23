@@ -11,7 +11,7 @@
 - **Исходники образа** – [`images/ssh-bastion/`](images/ssh-bastion/) включает Dockerfile, entrypoint, обёртки `ssh/scp/sftp` и CLI `codex-hostctl`.
 - **Шаблоны манифестов** – [`manifests/ssh-bastion/`](manifests/ssh-bastion/) содержит Namespace, ConfigMap, Deployment и Service (рендерятся через `envsubst`).
 - **Скрипт администратора** – [`scripts/deploy-ssh-bastion.sh`](scripts/deploy-ssh-bastion.sh) по желанию собирает/публикует образ, применяет манифесты, ожидает rollout и печатает итоговые значения `SSH_GW_NODE` и `SSH_KEY`.
-- **Скрипт внутри Codex** – [`scripts/setup-codex-workspace.sh`](scripts/setup-codex-workspace.sh) размещает ключ, обновляет `~/.ssh/config`, поднимает HTTPS-туннель и актуализирует инструкции в `AGENTS.md`.
+- **Скрипт внутри Codex** – [`scripts/setup-codex-workspace.sh`](scripts/setup-codex-workspace.sh) размещает ключ, обновляет `~/.ssh/config`, подключает HTTP-тоннель и актуализирует инструкции в `AGENTS.md`.
 
 ---
 
@@ -48,7 +48,7 @@
    ```bash
    kubectl -n codex-ssh get pods -o wide
    kubectl -n codex-ssh get svc ssh-bastion -o wide
-   curl -i http://<node-ip>:32222   # chisel вернёт HTTP 404 — значит NodePort виден
+  curl -i http://<node-ip>:32222/healthz   # ожидаем HTTP 200 — значит NodePort виден
    kubectl -n codex-ssh port-forward service/ssh-bastion-internal 2222:22 &
    ssh -p 2222 codex@127.0.0.1      # по завершении остановите port-forward (Ctrl+C)
    ```
@@ -60,7 +60,7 @@
 - Если в кластере доступен `LoadBalancer`, задайте `SSH_SERVICE_TYPE=LoadBalancer`, а также `SSH_PUBLIC_HOST`/`SSH_PUBLIC_PORT` с фактическим внешним адресом.
 - Либо поднимите Ingress, выдайте ему TLS-сертификат и установите `SSH_PUBLIC_HOST=<ingress-host>` (при необходимости измените `SSH_PUBLIC_SCHEME`).
 
-Сценарий в Codex остаётся прежним: `setup-codex-workspace.sh` поднимает chisel-тоннель до указанного HTTPS-адреса.
+Сценарий в Codex остаётся прежним: `setup-codex-workspace.sh` подключает HTTP-тоннель до указанного HTTPS-адреса.
 
 ---
 
@@ -84,9 +84,20 @@
    	cd "$PROJECT_PATH"
    ```
 
-   Помощник положит ключ в `configs/id-codex-ssh`, запустит фоновый HTTPS-туннель (`chisel`) на `127.0.0.1:${SSH_TUNNEL_LOCAL_PORT:-4022}` (PID хранится в `configs/ssh-chisel.pid`, лог — в `configs/ssh-chisel.log`), обновит `~/.ssh/config`, скачает инвентарь и добавит инструкцию в найденные `AGENTS.md`.
+   Помощник положит ключ в `configs/id-codex-ssh`, пропишет `ProxyCommand`, который вызывает `scripts/ssh-http-proxy.py`, обновит `~/.ssh/config`, скачает инвентарь и добавит инструкцию в найденные `AGENTS.md`.
 
 4. Для долгоживущих окружений поместите ту же последовательность в **Maintenance script**, чтобы конфигурация обновлялась после «пробуждения» контейнера.
+
+### 3.1 Быстрый тест внутри Codex workspace
+
+После подготовки конфигурации выполните из контейнера Codex smoke-тест:
+
+```bash
+cd /workspace/codex-with-ssh
+./scripts/test-http-tunnel.sh
+```
+
+Скрипт формирует временный `ssh_config` с `ProxyCommand`, использующим `scripts/ssh-http-proxy.py`, и запускает `codex-hostctl list` через бастион. При любой сетевой или аутентификационной ошибке он завершится с ненулевым кодом и выведет подробности — удобно привязать его к шагу **Tests** Codex workspace.
 
 ---
 
@@ -98,12 +109,12 @@
 | `SSH_DEPLOYMENT_NAME` | Имя Deployment. | `ssh-bastion` |
 | `SSH_SERVICE_NAME` | Имя Service. | `ssh-bastion` |
 | `SSH_SERVICE_TYPE` | Режим экспонирования (`NodePort`/`LoadBalancer`/`ClusterIP`). | `NodePort` |
-| `SSH_SERVICE_PORT` | Порт сервиса, который слушает chisel. | `443` |
+| `SSH_SERVICE_PORT` | Порт сервиса, который обслуживает HTTP-тоннель. | `80` |
 | `SSH_SERVICE_NODE_PORT` | NodePort на узлах (используется при `NodePort`). | `32222` |
 | `SSH_PUBLIC_HOST` | Внешний DNS (KeenDNS и т.п.), который смотрит на NodePort. | — |
 | `SSH_PUBLIC_PORT` | Порт, опубликованный во внешнем DNS/прокси. | `443` |
 | `SSH_PUBLIC_SCHEME` | Схема, которую нужно использовать в URL. | `https` |
-| `SSH_TUNNEL_PORT` | Внутренний порт, который обслуживает chisel. | `8080` |
+| `SSH_HTTP_TUNNEL_PORT` | Порт контейнера, на котором слушает HTTP-шлюз. | `8080` |
 | `SSH_TUNNEL_SECRET_NAME` | Название секрета с `user:token`. | `ssh-bastion-tunnel` |
 | `SSH_TUNNEL_USER` | Имя пользователя туннеля. | `codex` |
 | `SSH_TUNNEL_TOKEN` | Фиксированный токен (пусто — сгенерировать автоматически). | — |
@@ -140,7 +151,7 @@
 ## 7. Удаление
 
 ```bash
-kubectl -n codex-ssh delete deployment/ssh-bastion service/ssh-bastion \
+kubectl -n codex-ssh delete deployment/ssh-bastion service/ssh-bastion service/ssh-bastion-internal \
   configmap/ssh-bastion-config secret/ssh-authorized-keys
 kubectl -n codex-ssh delete pvc/codex-ssh-data   # пропустите для hostPath
 # Необязательно: kubectl delete namespace codex-ssh

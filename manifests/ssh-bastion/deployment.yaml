@@ -23,11 +23,22 @@ ${SSH_NODE_PLACEMENT_BLOCK}
           ports:
             - containerPort: 22
               name: ssh
+            - containerPort: ${SSH_HTTP_TUNNEL_PORT}
+              name: http-tunnel
           env:
             - name: SSH_NAMESPACE
               value: ${SSH_NAMESPACE}
             - name: SSH_AUTHORIZED_SECRET
               value: ${SSH_AUTHORIZED_SECRET}
+            - name: HTTP_TUNNEL_LISTEN_HOST
+              value: "0.0.0.0"
+            - name: HTTP_TUNNEL_LISTEN_PORT
+              value: "${SSH_HTTP_TUNNEL_PORT}"
+            - name: HTTP_TUNNEL_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: ${SSH_TUNNEL_SECRET_NAME}
+                  key: auth
           volumeMounts:
             - name: authorized-keys
               mountPath: /config/authorized_keys
@@ -64,25 +75,6 @@ ${SSH_NODE_PLACEMENT_BLOCK}
               port: 22
             initialDelaySeconds: 10
             periodSeconds: 20
-        - name: chisel-gateway
-          image: jpillora/chisel:1.9.1
-          args:
-            - server
-            - --port=${SSH_CHISEL_PORT}
-            - --auth=$(SSH_CHISEL_AUTH)
-            - --keepalive=25s
-${SSH_CHISEL_EXTRA_ARGS_BLOCK}
-          env:
-            - name: SSH_CHISEL_PORT
-              value: "${SSH_CHISEL_PORT}"
-            - name: SSH_CHISEL_AUTH
-              valueFrom:
-                secretKeyRef:
-                  name: ${SSH_TUNNEL_SECRET_NAME}
-                  key: auth
-          ports:
-            - containerPort: ${SSH_CHISEL_PORT}
-              name: chisel
       volumes:
         - name: authorized-keys
           secret:

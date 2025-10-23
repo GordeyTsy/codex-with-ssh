@@ -102,5 +102,11 @@ fi
 
 install -d -m 755 /run/sshd
 
+HTTP_TUNNEL_BIN="${WRAPPER_HOME}/bin/http_tunnel_server.py"
+if [ -x "${HTTP_TUNNEL_BIN}" ]; then
+  log "Starting HTTP tunnel server on ${HTTP_TUNNEL_LISTEN_HOST:-0.0.0.0}:${HTTP_TUNNEL_LISTEN_PORT:-8080}"
+  python3 "${HTTP_TUNNEL_BIN}" &
+fi
+
 log "Starting sshd"
 exec /usr/sbin/sshd -D -e

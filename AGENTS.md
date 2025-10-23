@@ -29,7 +29,7 @@
 4. Проверяем:
    - `kubectl -n codex-ssh get pods -o wide`
    - `kubectl -n codex-ssh get svc ssh-bastion -o wide`
-   - `curl -i http://<node-ip>:32222` (ожидаем HTTP 404 от chisel — значит NodePort доступен)
+   - `curl -i http://<node-ip>:32222/healthz` (ожидаем HTTP 200 — значит NodePort доступен)
    - `kubectl -n codex-ssh port-forward service/ssh-bastion-internal 2222:22 &` и `ssh -p 2222 codex@127.0.0.1` для прямого входа в под
 
 ## Поведение пода
@@ -65,10 +65,9 @@
    ```
 3. Скрипт:
    - кладёт ключ в `configs/id-codex-ssh`;
-   - скачивает и запускает `chisel` (HTTPS-туннель) на `127.0.0.1:${SSH_TUNNEL_LOCAL_PORT:-4022}`;
-   - обновляет `~/.ssh/config` и `~/.ssh/known_hosts` (через локальный туннель);
+   - прописывает `ProxyCommand`, который вызывает `scripts/ssh-http-proxy.py` и ходит к HTTPS-ендпойнту KeenDNS;
+   - обновляет `~/.ssh/config` и хранит ключи в `configs/ssh-known_hosts`;
    - скачивает инвентарь (`codex-hostctl export`) и обновляет инструкции в `AGENTS.md`.
-   - PID туннеля: `configs/ssh-chisel.pid`, лог: `configs/ssh-chisel.log`.
 4. Сценарий выше следует добавить и в Maintanence Script, чтобы контейнер поддерживал конфигурацию после «пробуждения».
 
 ## Обслуживание
@@ -84,10 +83,6 @@
 - Содержимое данных: `kubectl -n codex-ssh exec deploy/ssh-bastion -- ls -l /var/lib/codex-ssh`.
 - Для ручного администрирования внутри кластера используем `ssh-bastion-internal.codex-ssh.svc.cluster.local:22`.
 
-
-
-
-
 <!-- BEGIN CODEX SSH INVENTORY -->
 ### SSH-инвентарь
 
@@ -98,10 +93,9 @@
 ### Using the SSH bastion
 
 1. Run `./scripts/setup-codex-workspace.sh` whenever the workspace starts (also add it to the Maintenance script so cached restores keep the tunnel alive).
-2. Connect to any listed alias with `ssh <alias>` — the managed SSH config injects the ProxyJump chain automatically.
+2. Connect to any listed alias with `ssh <alias>` — the managed SSH config injects the HTTP tunnel automatically.
 3. After teaching the bastion new routes, rerun the helper so the inventory and tunnel metadata stay fresh.
 
-Туннель: chisel → https://codex-ssh.cyberspace.keenetic.link:443 → локальный порт 4022
-PID: /home/gt/projects/my/codex-with-ssh/configs/ssh-chisel.pid
-Лог: /home/gt/projects/my/codex-with-ssh/configs/ssh-chisel.log
+Туннель: ssh-http-proxy → https://example.com:443
+ProxyCommand script: /home/gt/projects/my/codex-with-ssh/scripts/ssh-http-proxy.py
 <!-- END CODEX SSH INVENTORY -->

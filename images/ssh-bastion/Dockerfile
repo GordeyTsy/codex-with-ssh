@@ -23,11 +23,12 @@ RUN useradd --create-home --home-dir /home/codex --shell /bin/bash codex \
 
 COPY entrypoint.sh /entrypoint.sh
 COPY codex-hostctl ${WRAPPER_HOME}/bin/codex-hostctl
+COPY http_tunnel_server.py ${WRAPPER_HOME}/bin/http_tunnel_server.py
 COPY bin/ ${WRAPPER_HOME}/bin/
 RUN chmod +x /entrypoint.sh ${WRAPPER_HOME}/bin/* \
     && ln -s ${WRAPPER_HOME}/bin/codex-hostctl /usr/local/bin/codex-hostctl \
     && ln -s ${WRAPPER_HOME}/bin/codex-ssh-wrapper /usr/local/bin/codex-ssh-wrapper
 
-EXPOSE 22
+EXPOSE 22 8080
 VOLUME ["${DATA_DIR}"]
 ENTRYPOINT ["/entrypoint.sh"]
