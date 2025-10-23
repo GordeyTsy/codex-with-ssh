@@ -137,10 +137,32 @@ ensure_permissions() {
 
 write_private_key() {
   local dest="$1" content="$2"
-  content="${content//$'\r'/}"
-  printf '%s\n' "${content}" >"${dest}.tmp"
-  chmod 600 "${dest}.tmp"
-  mv "${dest}.tmp" "${dest}"
+  SSH_KEY_INPUT="${content}" "${PYTHON_BIN}" - "${dest}" <<'PY'
+import os
+import base64
+import sys
+from pathlib import Path
+
+dest = Path(sys.argv[1])
+data = os.environ.get("SSH_KEY_INPUT", "")
+data = data.replace("\r", "")
+if "\\n" in data and "\n" not in data:
+    data = data.replace("\\n", "\n")
+if "BEGIN OPENSSH" not in data:
+    try:
+        decoded = base64.b64decode(data.encode("utf-8")).decode("utf-8")
+    except Exception:
+        decoded = data
+    else:
+        if "BEGIN OPENSSH" in decoded:
+            data = decoded
+if not data.endswith("\n"):
+    data += "\n"
+tmp = dest.with_suffix(dest.suffix + ".tmp")
+tmp.write_text(data, encoding="utf-8")
+tmp.chmod(0o600)
+tmp.replace(dest)
+PY
 }
 
 if [[ "${GENERATE_KEY}" == "1" ]]; then

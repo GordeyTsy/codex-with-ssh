@@ -82,9 +82,30 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 KEY_PATH="${TMP_DIR}/id"
-SANITIZED_KEY="${SSH_KEY//$'\r'/}"
-printf '%s\n' "${SANITIZED_KEY}" >"${KEY_PATH}"
-chmod 600 "${KEY_PATH}"
+python3 - "${KEY_PATH}" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+dest = Path(sys.argv[1])
+data = os.environ.get("SSH_KEY", "")
+data = data.replace("\r", "")
+if "\\n" in data and "\n" not in data:
+    data = data.replace("\\n", "\n")
+if "BEGIN OPENSSH" not in data:
+    import base64
+    try:
+        decoded = base64.b64decode(data.encode("utf-8")).decode("utf-8")
+    except Exception:
+        decoded = data
+    else:
+        if "BEGIN OPENSSH" in decoded:
+            data = decoded
+if not data.endswith("\n"):
+    data += "\n"
+dest.write_text(data, encoding="utf-8")
+dest.chmod(0o600)
+PY
 
 CONFIG_PATH="${TMP_DIR}/ssh_config"
 KNOWN_HOSTS="${TMP_DIR}/known_hosts"
