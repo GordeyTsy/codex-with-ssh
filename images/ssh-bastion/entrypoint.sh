@@ -33,6 +33,14 @@ chmod 700 "${DATA_DIR}"
 ensure_file "${DATA_DIR}/inventory.json" "[]" "${CODex_USER}:${CODex_USER}" 600
 ensure_file "${DATA_DIR}/labels.json" "{}" "${CODex_USER}:${CODex_USER}" 600
 
+# On some hostPath volumes files may keep stale ownership after container
+# recreation (for example when an earlier image wrote them as root:root).
+# Normalize permissions to keep codex-hostctl readable/writable.
+find "${DATA_DIR}" -maxdepth 1 -type f -exec chown "${CODex_USER}:${CODex_USER}" {} +
+find "${DATA_DIR}" -maxdepth 1 -type f -exec chmod 600 {} +
+chown "${CODex_USER}:${CODex_USER}" "${DATA_DIR}"
+chmod 700 "${DATA_DIR}"
+
 if [ -d "${AUTH_DIR}" ]; then
   AUTH_FILE="${AUTH_DIR}/authorized_keys"
   if [ -s "$AUTH_FILE" ]; then
