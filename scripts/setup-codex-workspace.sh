@@ -158,15 +158,19 @@ data = data.replace("\r", "")
 data = textwrap.dedent(data)
 if "\\n" in data and "\n" not in data:
     data = data.replace("\\n", "\n")
-if "BEGIN OPENSSH" not in data:
+if "-----BEGIN" not in data:
     try:
         sanitized = "".join(data.split())
-        decoded = base64.b64decode(sanitized.encode("utf-8")).decode("utf-8")
+        decoded_bytes = base64.b64decode(sanitized.encode("utf-8"))
     except Exception:
-        decoded = data
+        decoded_text = None
     else:
-        if "BEGIN OPENSSH" in decoded:
-            data = decoded
+        try:
+            decoded_text = decoded_bytes.decode("utf-8")
+        except Exception:
+            decoded_text = None
+        if decoded_text and "-----BEGIN" in decoded_text:
+            data = decoded_text
 if not data.endswith("\n"):
     data += "\n"
 tmp = dest.with_suffix(dest.suffix + ".tmp")

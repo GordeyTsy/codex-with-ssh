@@ -29,6 +29,7 @@ SSH_CONFIGMAP_NAME=${SSH_CONFIGMAP_NAME:-ssh-bastion-config}
 SSH_AUTHORIZED_SECRET=${SSH_AUTHORIZED_SECRET:-ssh-authorized-keys}
 SSH_BASTION_IMAGE=${SSH_BASTION_IMAGE:-codex-ssh-bastion:latest}
 SSH_IMAGE_REGISTRY=${SSH_IMAGE_REGISTRY:-}
+SSH_IMAGE_PULL_POLICY=${SSH_IMAGE_PULL_POLICY:-}
 SSH_BUILD_IMAGE=${SSH_BUILD_IMAGE:-auto}
 SSH_PUSH_IMAGE=${SSH_PUSH_IMAGE:-}
 SSH_DOCKERFILE=${SSH_DOCKERFILE:-${ROOT_DIR}/images/ssh-bastion/Dockerfile}
@@ -47,6 +48,8 @@ SSH_GENERATE_WORKSPACE_KEY=${SSH_GENERATE_WORKSPACE_KEY:-auto}
 SSH_WORKSPACE_KEY_TYPE=${SSH_WORKSPACE_KEY_TYPE:-ed25519}
 SSH_WORKSPACE_KEY_COMMENT=${SSH_WORKSPACE_KEY_COMMENT:-codex@workspace}
 SSH_WORKSPACE_KEY_OUTPUT=${SSH_WORKSPACE_KEY_OUTPUT:-${ROOT_DIR}/configs/workspace-key}
+SSH_WORKSPACE_KEY_BITS=${SSH_WORKSPACE_KEY_BITS:-}
+SSH_WORKSPACE_KEY_FORMAT=${SSH_WORKSPACE_KEY_FORMAT:-}
 
 if [[ -n "${SSH_IMAGE_REGISTRY}" ]]; then
   SSH_BASTION_IMAGE_REF="${SSH_IMAGE_REGISTRY%/}/${SSH_BASTION_IMAGE}"
@@ -83,6 +86,14 @@ case "${SSH_PUSH_IMAGE}" in
     exit 1
     ;;
 esac
+
+if [[ -z "${SSH_IMAGE_PULL_POLICY}" ]]; then
+  if [[ "${SSH_PUSH_IMAGE}" == true ]]; then
+    SSH_IMAGE_PULL_POLICY=Always
+  else
+    SSH_IMAGE_PULL_POLICY=IfNotPresent
+  fi
+fi
 
 NEED_BUILD=false
 case "${SSH_BUILD_IMAGE}" in
@@ -196,9 +207,9 @@ fi
 export SSH_NAMESPACE SSH_DEPLOYMENT_NAME SSH_SERVICE_NAME SSH_SERVICE_TYPE \
   SSH_SERVICE_NODE_PORT SSH_SERVICE_NODE_PORT_LINE SSH_PVC_NAME SSH_PVC_SIZE \
   SSH_STORAGE_CLASS_BLOCK SSH_CONFIGMAP_NAME SSH_AUTHORIZED_SECRET \
-  SSH_BASTION_IMAGE_REF SSH_MOTD_CONTENT_BLOCK SSH_DATA_VOLUME_BLOCK \
-  SSH_NODE_PLACEMENT_BLOCK EFFECTIVE_STORAGE_TYPE SSH_SERVICE_PORT \
-  SSH_HTTP_TUNNEL_PORT SSH_TUNNEL_SECRET_NAME
+  SSH_BASTION_IMAGE_REF SSH_IMAGE_PULL_POLICY SSH_MOTD_CONTENT_BLOCK \
+  SSH_DATA_VOLUME_BLOCK SSH_NODE_PLACEMENT_BLOCK EFFECTIVE_STORAGE_TYPE \
+  SSH_SERVICE_PORT SSH_HTTP_TUNNEL_PORT SSH_TUNNEL_SECRET_NAME
 
 case "${SSH_GENERATE_WORKSPACE_KEY}" in
   true|false|auto)
@@ -293,8 +304,22 @@ if [[ "${GENERATE_WORKSPACE_KEY}" == true ]]; then
     exit 1
   }
   WORKSPACE_KEY_BASE="${TMP_DIR}/codex-workspace-key"
-  ssh-keygen -t "${SSH_WORKSPACE_KEY_TYPE}" -N "" -C "${SSH_WORKSPACE_KEY_COMMENT}" \
-    -f "${WORKSPACE_KEY_BASE}" >/dev/null
+  KEYGEN_ARGS=(-t "${SSH_WORKSPACE_KEY_TYPE}" -N "" -C "${SSH_WORKSPACE_KEY_COMMENT}" -f "${WORKSPACE_KEY_BASE}")
+  if [[ -n "${SSH_WORKSPACE_KEY_BITS}" ]]; then
+    KEYGEN_ARGS+=(-b "${SSH_WORKSPACE_KEY_BITS}")
+  fi
+  if [[ -n "${SSH_WORKSPACE_KEY_FORMAT}" ]]; then
+    case "${SSH_WORKSPACE_KEY_TYPE}" in
+      rsa|dsa|ecdsa)
+        KEYGEN_ARGS+=(-m "${SSH_WORKSPACE_KEY_FORMAT}")
+        ;;
+      *)
+        printf 'Requested SSH_WORKSPACE_KEY_FORMAT=%s is not supported for key type %s; ignoring.\n' \
+          "${SSH_WORKSPACE_KEY_FORMAT}" "${SSH_WORKSPACE_KEY_TYPE}" >&2
+        ;;
+    esac
+  fi
+  ssh-keygen "${KEYGEN_ARGS[@]}" >/dev/null
   SSH_AUTHORIZED_KEYS_FILE="${WORKSPACE_KEY_BASE}.pub"
   WORKSPACE_PRIVATE_KEY_PATH="${WORKSPACE_KEY_BASE}"
   printf 'Generated new workspace key pair (%s)\n' "${SSH_WORKSPACE_KEY_TYPE}"
@@ -466,12 +491,15 @@ PY
   fi
 
   printf 'Однострочный вариант (секрет/переменная SSH_KEY_BASE64):\nSSH_KEY_BASE64=%s\n\n' "${KEY_BASE64}"
-  printf 'Для восстановления ключа из переменной:\n'
-  printf '  python3 - <<\'PY\' > id-codex-ssh\n'
-  printf 'import base64, sys\n'
-  printf 'data = base64.b64decode(sys.stdin.read().strip())\n'
-  printf 'sys.stdout.buffer.write(data)\n'
-  printf 'PY\n\n'
+  cat <<'PY_HELP'
+Для восстановления ключа из переменной:
+  python3 - <<'PY' > id-codex-ssh
+import base64, sys
+data = base64.b64decode(sys.stdin.read().strip())
+sys.stdout.buffer.write(data)
+PY
+
+PY_HELP
 }
 
 if [[ -n "${WORKSPACE_PRIVATE_KEY_PATH}" ]]; then

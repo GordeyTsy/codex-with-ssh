@@ -91,10 +91,14 @@ GW_PORT="${gw_parts[2]}"
 GW_ENDPOINT="${GW_SCHEME}://${GW_HOST}:${GW_PORT}"
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "${TMP_DIR}"' EXIT
+if [[ -n "${SSH_TEST_KEEP_TMP:-}" ]]; then
+  printf '==> debug: preserving temp directory %s\n' "${TMP_DIR}"
+else
+  trap 'rm -rf "${TMP_DIR}"' EXIT
+fi
 
 KEY_PATH="${TMP_DIR}/id"
-python3 - "${KEY_PATH}" <<'PY'
+SSH_KEY_INPUT="${SSH_KEY}" python3 - "${KEY_PATH}" <<'PY'
 import os
 import sys
 import textwrap
@@ -102,20 +106,24 @@ import base64
 from pathlib import Path
 
 dest = Path(sys.argv[1])
-data = os.environ.get("SSH_KEY", "")
+data = os.environ.get("SSH_KEY_INPUT", "")
 data = data.replace("\r", "")
 data = textwrap.dedent(data)
 if "\\n" in data and "\n" not in data:
     data = data.replace("\\n", "\n")
-if "BEGIN OPENSSH" not in data:
+if "-----BEGIN" not in data:
     try:
         sanitized = "".join(data.split())
-        decoded = base64.b64decode(sanitized.encode("utf-8")).decode("utf-8")
+        decoded_bytes = base64.b64decode(sanitized.encode("utf-8"))
     except Exception:
-        decoded = data
+        decoded_text = None
     else:
-        if "BEGIN OPENSSH" in decoded:
-            data = decoded
+        try:
+            decoded_text = decoded_bytes.decode("utf-8")
+        except Exception:
+            decoded_text = None
+        if decoded_text and "-----BEGIN" in decoded_text:
+            data = decoded_text
 if not data.endswith("\n"):
     data += "\n"
 dest.write_text(data, encoding="utf-8")

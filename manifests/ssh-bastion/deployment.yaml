@@ -19,7 +19,7 @@ ${SSH_NODE_PLACEMENT_BLOCK}
       containers:
         - name: codex-ssh-bastion
           image: ${SSH_BASTION_IMAGE_REF}
-          imagePullPolicy: Always
+          imagePullPolicy: ${SSH_IMAGE_PULL_POLICY}
           ports:
             - containerPort: 22
               name: ssh
