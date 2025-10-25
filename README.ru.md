@@ -32,16 +32,7 @@
    scripts/deploy-ssh-bastion.sh
    ```
 
-   По завершении будет выведено:
-
-   ```text
-   SSH_GW_NODE=<keen-dns-domain>:443
-   SSH_GW_USER=codex
-   SSH_GW_TOKEN=<сгенерированный-токен>
-   SSH_KEY=-----BEGIN OPENSSH PRIVATE KEY-----…
-   ```
-
-   Сохраните эти строки — `SSH_GW_NODE`/`SSH_GW_USER`/`SSH_GW_TOKEN` станут переменными в Codex, а `SSH_KEY` — секретом. KeenDNS слушает порт 443, поэтому Codex, требующий TLS-friendly `CONNECT`, сможет дотянуться до бастиона. Прямое `ssh codex@<keen-dns-domain>:443` работать не будет — требуется HTTPS-тоннель.
+   Скрипт перезапускает Deployment, ожидает rollout и печатает конечные параметры: `SSH_GW_NODE`, `SSH_GW_USER`, `SSH_GW_TOKEN`, а также приватный ключ в PEM и однострочном (`SSH_KEY_BASE64`) виде. Сохраните эти значения сразу: URL и токен понадобятся как переменные Codex, а ключ — как секрет. KeenDNS пробрасывает HTTPS на порт 443, поэтому Codex, который пропускает только TLS-friendly `CONNECT`, сможет подключиться через выданный URL; прямой `ssh codex@<keen-dns-domain>:443` по-прежнему не работает — используется HTTP-тоннель.
 
 3. Проверьте состояние:
 
@@ -71,7 +62,9 @@
    - `SSH_GW_USER=codex`
    - `SSH_GW_TOKEN=<токен из вывода скрипта>`
    - *(опционально)* `SSH_HTTP_INSECURE=1`, если у HTTPS-ендпойнта самоподписанный сертификат или не совпадает имя хоста.
-2. В **Settings → Secrets** добавьте `SSH_KEY=<приватный ключ из вывода скрипта>`.
+2. В **Settings → Secrets** добавьте один из вариантов:
+   - `SSH_KEY_BASE64=<значение, выведенное как SSH_KEY_BASE64=…>` (рекомендуется для копирования в одну строку);
+   - `SSH_KEY=<приватный ключ в PEM, если удобнее так>`.
 3. Внутри контейнера выполните:
 
    ```bash

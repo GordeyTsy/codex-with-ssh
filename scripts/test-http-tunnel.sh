@@ -15,7 +15,6 @@ require_env() {
   fi
 }
 
-require_env "SSH_KEY"
 require_env "SSH_GW_TOKEN"
 
 SSH_GW_USER="${SSH_GW_USER:-codex}"
@@ -32,6 +31,19 @@ fi
 
 if ! command -v ssh >/dev/null 2>&1; then
   err "ssh client is required."
+  exit 1
+fi
+
+if [[ -z "${SSH_KEY:-}" ]]; then
+  if [[ -n "${SSH_KEY_BASE64:-}" ]]; then
+    SSH_KEY="${SSH_KEY_BASE64}"
+  elif [[ -n "${SSH_KEY_B64:-}" ]]; then
+    SSH_KEY="${SSH_KEY_B64}"
+  fi
+fi
+
+if [[ -z "${SSH_KEY:-}" ]]; then
+  err "Environment variable SSH_KEY (or SSH_KEY_BASE64) is required."
   exit 1
 fi
 
@@ -85,17 +97,20 @@ KEY_PATH="${TMP_DIR}/id"
 python3 - "${KEY_PATH}" <<'PY'
 import os
 import sys
+import textwrap
+import base64
 from pathlib import Path
 
 dest = Path(sys.argv[1])
 data = os.environ.get("SSH_KEY", "")
 data = data.replace("\r", "")
+data = textwrap.dedent(data)
 if "\\n" in data and "\n" not in data:
     data = data.replace("\\n", "\n")
 if "BEGIN OPENSSH" not in data:
-    import base64
     try:
-        decoded = base64.b64decode(data.encode("utf-8")).decode("utf-8")
+        sanitized = "".join(data.split())
+        decoded = base64.b64decode(sanitized.encode("utf-8")).decode("utf-8")
     except Exception:
         decoded = data
     else:

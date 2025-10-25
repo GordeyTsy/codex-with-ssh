@@ -18,14 +18,7 @@
    set +a
    scripts/deploy-ssh-bastion.sh
    ```
-3. Скрипт строит/публикует образ (если включено), применяет манифесты и ждёт rollout. В конце печатает ключевые строки, которые обязательно сохраняем:
-   ```
-   SSH_GW_NODE=<keen-dns-domain>:443
-   SSH_GW_USER=codex
-   SSH_GW_TOKEN=<токен>
-   SSH_KEY=-----BEGIN OPENSSH PRIVATE KEY----- ... -----END OPENSSH PRIVATE KEY-----
-   ```
-   `SSH_GW_NODE`/`SSH_GW_USER`/`SSH_GW_TOKEN` идут в переменные Codex, `SSH_KEY` — в секрет.
+3. Скрипт строит/публикует образ (если включено), применяет манифесты и ждёт rollout. В конце печатает ключевые строки, которые обязательно сохраняем: `SSH_GW_NODE`, `SSH_GW_USER`, `SSH_GW_TOKEN`, а также приватный ключ в PEM и однострочном (`SSH_KEY_BASE64=…`) формате. URL/логин/токен идут в переменные Codex, ключ — в секрет (`SSH_KEY_BASE64` или `SSH_KEY`).
 4. Проверяем:
    - `kubectl -n codex-ssh get pods -o wide`
    - `kubectl -n codex-ssh get svc ssh-bastion -o wide`
@@ -51,7 +44,7 @@
 ## Codex workspace
 1. В Codex:
    - Variables: `SSH_GW_NODE=<keen-dns-domain>:443`, `SSH_GW_USER=codex`, `SSH_GW_TOKEN=<token>`
-   - Secret: содержимое `SSH_KEY` из вывода скрипта.
+   - Secret: `SSH_KEY_BASE64=<значение из вывода>` (или `SSH_KEY=<PEM>`, если удобнее).
 2. Внутри контейнера выполняем:
    ```bash
    export PROJECT_PATH="$(pwd)"

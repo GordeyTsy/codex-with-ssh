@@ -80,6 +80,14 @@ SSH_HTTP_INSECURE="${SSH_HTTP_INSECURE:-0}"
 SSH_HTTP_SNI="${SSH_HTTP_SNI:-}"
 SSH_HTTP_CA_FILE="${SSH_HTTP_CA_FILE:-}"
 
+if [[ -z "${SSH_KEY:-}" ]]; then
+  if [[ -n "${SSH_KEY_BASE64:-}" ]]; then
+    SSH_KEY="${SSH_KEY_BASE64}"
+  elif [[ -n "${SSH_KEY_B64:-}" ]]; then
+    SSH_KEY="${SSH_KEY_B64}"
+  fi
+fi
+
 if [[ -z "${SSH_GW_TOKEN}" ]]; then
   log_error "SSH_GW_TOKEN is not set. Provide the token from deploy-ssh-bastion.sh output."
   exit 1
@@ -141,16 +149,19 @@ write_private_key() {
 import os
 import base64
 import sys
+import textwrap
 from pathlib import Path
 
 dest = Path(sys.argv[1])
 data = os.environ.get("SSH_KEY_INPUT", "")
 data = data.replace("\r", "")
+data = textwrap.dedent(data)
 if "\\n" in data and "\n" not in data:
     data = data.replace("\\n", "\n")
 if "BEGIN OPENSSH" not in data:
     try:
-        decoded = base64.b64decode(data.encode("utf-8")).decode("utf-8")
+        sanitized = "".join(data.split())
+        decoded = base64.b64decode(sanitized.encode("utf-8")).decode("utf-8")
     except Exception:
         decoded = data
     else:

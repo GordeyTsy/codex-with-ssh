@@ -32,7 +32,7 @@ Requirements: `kubectl`, `envsubst`, `docker` (when `SSH_BUILD_IMAGE=true` or a 
    scripts/deploy-ssh-bastion.sh
    ```
 
-   The script restarts the deployment, waits for the rollout, then prints four key lines:
+   The script restarts the deployment, waits for the rollout, then prints the tunnel endpoint, credentials, and the Codex workspace key in both PEM and one-line (`SSH_KEY_BASE64`) formats:
 
    ```
    SSH_GW_NODE=<keen-dns-domain>:443
@@ -64,7 +64,9 @@ Requirements: `kubectl`, `envsubst`, `docker` (when `SSH_BUILD_IMAGE=true` or a 
   - `SSH_GW_USER=codex`
   - `SSH_GW_TOKEN=<the token printed by the deploy script>`
   - *(optional)* `SSH_HTTP_INSECURE=1` if your HTTPS endpoint presents a mismatched or self-signed certificate.
-2. In **Settings → Secrets** add: `SSH_KEY=<the private key printed by the deploy script>`.
+2. In **Settings → Secrets** add one of:
+  - `SSH_KEY_BASE64=<the single-line value printed as SSH_KEY_BASE64=…>` (recommended for easy copy/paste); or
+  - `SSH_KEY=<the multi-line private key>`.
 3. In the workspace container, run:
 
    ```bash

@@ -439,18 +439,47 @@ Codex workspace configuration:
 ---
 INFO
 
-if [[ -n "${WORKSPACE_PRIVATE_KEY_PATH}" ]]; then
-  printf '\nСохраните приватный ключ для Codex Workspace (секрет SSH_KEY):\n\n'
-  cat "${WORKSPACE_PRIVATE_KEY_PATH}"
-  printf '\n'
-else
-  if [[ -n "${SSH_WORKSPACE_KEY_OUTPUT}" && -f "${SSH_WORKSPACE_KEY_OUTPUT}" ]]; then
-    printf '\nИспользуйте сохранённый приватный ключ (%s).\n' "${SSH_WORKSPACE_KEY_OUTPUT}"
-    cat "${SSH_WORKSPACE_KEY_OUTPUT}"
-    printf '\n'
-  elif [[ -n "${SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
-    printf '\nПриватный ключ не выводится, так как использован подготовленный authorized_keys (%s).\n' "${SSH_AUTHORIZED_KEYS_FILE}"
-  else
-    printf '\nПриватный ключ не был сгенерирован автоматически (секрет %s уже существует). Удалите секрет или установите SSH_GENERATE_WORKSPACE_KEY=true, чтобы выпустить новую пару ключей.\n' "${SSH_AUTHORIZED_SECRET}"
+print_key_payloads() {
+  local key_path="$1"
+  local key_label="$2"
+  if [[ -z "${key_path}" || ! -f "${key_path}" ]]; then
+    return
   fi
+
+  printf '\nСохраните приватный ключ для Codex Workspace (секрет %s):\n\n' "${key_label}"
+  cat "${key_path}"
+  printf '\n'
+
+  if command -v python3 >/dev/null 2>&1; then
+    KEY_BASE64="$(python3 - "${key_path}" <<'PY'
+import base64
+import sys
+from pathlib import Path
+
+key_path = Path(sys.argv[1])
+payload = key_path.read_bytes()
+print(base64.b64encode(payload).decode("ascii"))
+PY
+)"
+  else
+    KEY_BASE64="$(base64 <"${key_path}" | tr -d '\n')"
+  fi
+
+  printf 'Однострочный вариант (секрет/переменная SSH_KEY_BASE64):\nSSH_KEY_BASE64=%s\n\n' "${KEY_BASE64}"
+  printf 'Для восстановления ключа из переменной:\n'
+  printf '  python3 - <<\'PY\' > id-codex-ssh\n'
+  printf 'import base64, sys\n'
+  printf 'data = base64.b64decode(sys.stdin.read().strip())\n'
+  printf 'sys.stdout.buffer.write(data)\n'
+  printf 'PY\n\n'
+}
+
+if [[ -n "${WORKSPACE_PRIVATE_KEY_PATH}" ]]; then
+  print_key_payloads "${WORKSPACE_PRIVATE_KEY_PATH}" "SSH_KEY"
+elif [[ -n "${SSH_WORKSPACE_KEY_OUTPUT}" && -f "${SSH_WORKSPACE_KEY_OUTPUT}" ]]; then
+  print_key_payloads "${SSH_WORKSPACE_KEY_OUTPUT}" "SSH_KEY"
+elif [[ -n "${SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
+  printf '\nПриватный ключ не выводится, так как использован подготовленный authorized_keys (%s).\n' "${SSH_AUTHORIZED_KEYS_FILE}"
+else
+  printf '\nПриватный ключ не был сгенерирован автоматически (секрет %s уже существует). Удалите секрет или установите SSH_GENERATE_WORKSPACE_KEY=true, чтобы выпустить новую пару ключей.\n' "${SSH_AUTHORIZED_SECRET}"
 fi
