@@ -77,20 +77,19 @@
 - Для ручного администрирования внутри кластера используем `ssh-bastion-internal.codex-ssh.svc.cluster.local:22`.
 
 <!-- BEGIN CODEX SSH INVENTORY -->
-### SSH-инвентарь
+### SSH inventory
 
-| Имя | ProxyCommand | Хост | Пользователь | Порт | Метки |
-| --- | ------------ | ---- | ------------ | ---- | ----- |
-| 192.168.1.115:22 | ssh-http-proxy | 192.168.1.115 | gt | 22 | — |
+Inventory unavailable: inventory endpoint returned no data.
 
-ℹ️ Переименовать цель: `codex-hostctl rename <old> <new>`.
+ℹ️ Rename a target: `codex-hostctl rename <old> <new>`.
 
-### Using the SSH bastion
+### Workspace usage
 
-1. Run `./scripts/setup-codex-workspace.sh` whenever the workspace starts (also add it to the Maintenance script so cached restores keep the tunnel alive).
-2. Connect to any listed alias with `ssh <alias>` — the managed SSH config injects the HTTP tunnel automatically.
-3. After teaching the bastion new routes, rerun the helper so the inventory and tunnel metadata stay fresh.
+1. Open an interactive shell through the bastion: `ssh <alias>`.
+2. Run a quick command: `ssh <alias> "uptime"` or any other remote command.
+3. Transfer files over the tunnel: `scp ./local.txt <alias>:/tmp/`.
+4. After adding new routes on the bastion, refresh the inventory with `codex-hostctl export` and rerun this helper.
 
-Туннель: ssh-http-proxy → https://codex-ssh.cyberspace.keenetic.link:443
-ProxyCommand script: /workspace/codex-with-ssh/scripts/ssh-http-proxy.py
+Tunnel endpoint: ssh-http-proxy → https://codex-ssh.cyberspace.keenetic.link:443
+ProxyCommand helper: /home/gt/projects/my/codex-with-ssh/scripts/ssh-http-proxy.py
 <!-- END CODEX SSH INVENTORY -->

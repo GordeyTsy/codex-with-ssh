@@ -326,15 +326,15 @@ if status == "available" and inventory_path.exists():
     try:
         data = json.loads(inventory_path.read_text())
     except Exception as exc:  # noqa: BLE001
-        error_message = f"не удалось распарсить JSON ({exc})"
+        error_message = f"failed to parse JSON ({exc})"
     else:
         if isinstance(data, list):
             hosts_raw = data
         else:
-            error_message = "некорректный формат JSON"
+            error_message = "inventory has unexpected JSON structure"
 else:
     if status != "available":
-        error_message = "не удалось получить данные"
+        error_message = "inventory endpoint returned no data"
 
 result_hosts = []
 scan_list = []
@@ -364,14 +364,14 @@ for item in hosts_raw:
 
 result_hosts.sort(key=lambda item: item["alias"].lower())
 
-lines = ["### SSH-инвентарь", ""]
+lines = ["### SSH inventory", ""]
 if error_message:
-    lines.append(f"Инвентарь недоступен: {error_message}.")
+    lines.append(f"Inventory unavailable: {error_message}.")
 elif not result_hosts:
-    lines.append("Инвентарь пуст — codex-hostctl не вернул целей.")
+    lines.append("Inventory is empty — `codex-hostctl export` did not return any targets.")
 else:
-    lines.append("| Имя | ProxyCommand | Хост | Пользователь | Порт | Метки |")
-    lines.append("| --- | ------------ | ---- | ------------ | ---- | ----- |")
+    lines.append("| Name | ProxyCommand | Host | User | Port | Labels |")
+    lines.append("| ---- | ------------ | ---- | ---- | ---- | ------ |")
     for entry in result_hosts:
         alias = entry["alias"]
         label = label_overrides.get(alias, alias)
@@ -382,16 +382,17 @@ else:
         lines.append(f"| {label} | ssh-http-proxy | {hostname} | {user} | {port} | {labels} |")
 lines.extend([
     "",
-    "ℹ️ Переименовать цель: `codex-hostctl rename <old> <new>`.",
+    "ℹ️ Rename a target: `codex-hostctl rename <old> <new>`.",
     "",
-    "### Using the SSH bastion",
+    "### Workspace usage",
     "",
-    "1. Run `./scripts/setup-codex-workspace.sh` whenever the workspace starts (also add it to the Maintenance script so cached restores keep the tunnel alive).",
-    "2. Connect to any listed alias with `ssh <alias>` — the managed SSH config injects the HTTP tunnel automatically.",
-    "3. After teaching the bastion new routes, rerun the helper so the inventory and tunnel metadata stay fresh.",
+    "1. Open an interactive shell through the bastion: `ssh <alias>`.",
+    "2. Run a quick command: `ssh <alias> \"uptime\"` or any other remote command.",
+    "3. Transfer files over the tunnel: `scp ./local.txt <alias>:/tmp/`.",
+    "4. After adding new routes on the bastion, refresh the inventory with `codex-hostctl export` and rerun this helper.",
     "",
-    f"Туннель: ssh-http-proxy → {gateway_endpoint}",
-    f"ProxyCommand script: {proxy_script}",
+    f"Tunnel endpoint: ssh-http-proxy → {gateway_endpoint}",
+    f"ProxyCommand helper: {proxy_script}",
 ])
 
 summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
